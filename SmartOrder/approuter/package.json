@@ -1,0 +1,11 @@
+{
+  "name": "smartorder-approuter",
+  "version": "1.0.0",
+  "description": "SmartOrder AppRouter — Point d'entrée public SAP BTP",
+  "dependencies": {
+    "@sap/approuter": "^16"
+  },
+  "scripts": {
+    "start": "node node_modules/@sap/approuter/approuter.js"
+  }
+}

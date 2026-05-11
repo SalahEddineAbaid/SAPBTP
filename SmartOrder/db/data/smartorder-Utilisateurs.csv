@@ -1,0 +1,4 @@
+ID,xsuaa_user_id,username,email,prenom,nom,role,actif
+bbbbbbbb-0001-0000-0000-000000000001,admin-xsuaa-001,admin.system,admin@yaas.ma,Admin,System,ADMIN,true
+bbbbbbbb-0002-0000-0000-000000000002,manager-xsuaa-002,m.benali,m.benali@yaas.ma,Mohamed,Benali,MANAGER,true
+bbbbbbbb-0003-0000-0000-000000000003,user-xsuaa-003,y.alami,y.alami@yaas.ma,Youssef,Alami,USER,true

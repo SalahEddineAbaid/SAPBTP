@@ -1,0 +1,3 @@
+# models_storage — placeholder
+# Ce dossier contiendra les modèles .pkl après le premier réentraînement.
+# Ne pas commitez les fichiers .pkl (ajoutez-les à .gitignore).

@@ -1,0 +1,105 @@
+{
+  "name": "smartorder",
+  "version": "1.0.0",
+  "description": "SmartOrder — Application intelligente de gestion des commandes SAP BTP (YAAS)",
+  "repository": "<Add your repository here>",
+  "license": "UNLICENSED",
+  "private": true,
+
+  "dependencies": {
+    "@sap/cds": "^8",
+    "@sap/cds-dk": "^8",
+    "@cap-js/postgres": "^1",
+    "@sap/xssec": "^4",
+    "@sap/xsenv": "^5",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.4",
+    "node-cron": "^3.0.3",
+    "csv-stringify": "^6.4.4",
+    "axios": "^1.6.7",
+    "uuid": "^9.0.0",
+    "express-rate-limit": "^7.1.5",
+    "compression": "^1.7.4",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "@sap/audit-logging": "^5",
+    "hdb": "^0.19.10",
+    "dotenv": "^16.3.1"
+  },
+
+  "devDependencies": {
+    "@cap-js/sqlite": "^1",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "eslint": "^10.0.0"
+  },
+
+  "scripts": {
+    "start":      "cds-serve",
+    "dev":        "cds watch",
+    "build":      "cds build",
+    "deploy:db":  "cds deploy --to postgres",
+    "test":       "jest --coverage --forceExit",
+    "lint":       "eslint srv/"
+  },
+
+  "cds": {
+    "requires": {
+      "db": {
+        "kind": "postgres",
+        "[development]": {
+          "kind": "sqlite",
+          "credentials": { "url": "db.sqlite" }
+        },
+        "[hybrid]": {
+          "kind": "postgres"
+        }
+      },
+      "auth": {
+        "kind": "xsuaa",
+        "[development]": {
+          "kind": "mocked",
+          "users": {
+            "admin": {
+              "password": "admin",
+              "roles": ["ADMIN"],
+              "attributes": { "username": "admin", "email": "admin@yaas.ma" }
+            },
+            "manager": {
+              "password": "manager",
+              "roles": ["MANAGER"],
+              "attributes": { "username": "m.benali", "email": "m.benali@yaas.ma" }
+            },
+            "user": {
+              "password": "user",
+              "roles": ["USER"],
+              "attributes": { "username": "y.alami", "email": "y.alami@yaas.ma" }
+            }
+          }
+        }
+      },
+      "destinations": { "kind": "destinations" },
+      "html5-repo": { "kind": "html5-repo-runtime" },
+      "logging": { "kind": "application-logging" }
+    },
+    "server": "./server.js",
+    "features": {
+      "fetch_csrf": true,
+      "serve_on_root": true
+    },
+    "build": {
+      "target": "gen"
+    }
+  },
+
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage",
+    "testMatch": ["**/__tests__/**/*.test.js"],
+    "testTimeout": 30000
+  },
+
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

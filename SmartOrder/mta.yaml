@@ -1,0 +1,213 @@
+_schema-version: "3.3.0"
+ID: SmartOrder
+version: 1.0.0
+description: "SmartOrder — Application intelligente de gestion des commandes SAP BTP (YAAS)"
+
+parameters:
+  enable-parallel-deployments: true
+  deploy_mode: html5-repo
+
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npx cds build --production
+
+# ============================================================
+# MODULES (5)
+# ============================================================
+modules:
+
+  # ----------------------------------------------------------
+  # 1. CAP Backend (Node.js) — srv
+  # ----------------------------------------------------------
+  - name: SmartOrder-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      instances: 1
+      buildpack: nodejs_buildpack
+      memory: 512M
+      disk-quota: 512M
+    build-parameters:
+      builder: npm-ci
+    properties:
+      NODE_ENV: production
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    requires:
+      - name: SmartOrder-auth
+      - name: SmartOrder-postgres
+      - name: SmartOrder-destination
+      - name: SmartOrder-logging
+
+  # ----------------------------------------------------------
+  # 2. DB Deployer (CDS → PostgreSQL)
+  # ----------------------------------------------------------
+  - name: SmartOrder-db-deployer
+    type: nodejs
+    path: gen/pg
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 256M
+      no-route: true
+      no-start: true
+      tasks:
+        - name: deploy-to-postgresql
+          command: npm start
+    build-parameters:
+      ignore:
+        - node_modules/
+        - ".env"
+    requires:
+      - name: SmartOrder-postgres
+
+  # ----------------------------------------------------------
+  # 3. ML Service (FastAPI / Python)
+  # ----------------------------------------------------------
+  - name: SmartOrder-ml
+    type: python
+    path: ml-service
+    parameters:
+      buildpack: python_buildpack
+      memory: 1G
+      disk-quota: 2G
+      instances: 1
+      health-check-type: http
+      health-check-http-endpoint: /health
+    build-parameters:
+      builder: custom
+      commands:
+        - pip install -r requirements.txt --target ./vendor
+        - python train_initial_model.py
+    properties:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    requires:
+      - name: SmartOrder-postgres
+    provides:
+      - name: ml-api
+        properties:
+          ml-url: ${default-url}
+
+  # ----------------------------------------------------------
+  # 4. Frontend React (CRA) — HTML5 Deployer
+  # ----------------------------------------------------------
+  - name: SmartOrder-ui-deployer
+    type: com.sap.application.content
+    path: app/orders-ui
+    build-parameters:
+      build-result: build
+      builder: custom
+      commands:
+        - npm ci
+        - npm run build
+      supported-platforms: []
+    requires:
+      - name: SmartOrder-html5-repo-host
+        parameters:
+          content-target: true
+
+  # ----------------------------------------------------------
+  # 5. AppRouter (point d'entrée public)
+  # ----------------------------------------------------------
+  - name: SmartOrder-approuter
+    type: approuter.nodejs
+    path: approuter
+    parameters:
+      keep-existing-routes: true
+      disk-quota: 256M
+      memory: 256M
+      instances: 1
+    requires:
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+      - name: SmartOrder-auth
+      - name: SmartOrder-html5-runtime
+      - name: SmartOrder-destination
+      - name: SmartOrder-logging
+    provides:
+      - name: app-api
+        properties:
+          app-protocol: ${protocol}
+          app-uri: ${default-uri}
+
+# ============================================================
+# RESOURCES (6)
+# ============================================================
+resources:
+
+  # 1. XSUAA — Authentification OAuth2
+  - name: SmartOrder-auth
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: SmartOrder-${org}-${space}
+        tenant-mode: dedicated
+        oauth2-configuration:
+          credential-types:
+            - binding-secret
+            - x509
+          redirect-uris:
+            - https://*~{app-api/app-uri}/**
+    requires:
+      - name: app-api
+
+  # 2. PostgreSQL — Base de données
+  - name: SmartOrder-postgres
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: postgresql-db
+      service-plan: development
+
+  # 3. SAP Destination Service
+  - name: SmartOrder-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+      config:
+        init_data:
+          instance:
+            existing_destinations_policy: update
+            destinations:
+              - Name: SAP_ERP
+                Description: SAP S/4HANA Cloud — YAAS Partner Demo Tenant
+                Authentication: BasicAuthentication
+                ProxyType: Internet
+                Type: HTTP
+                URL: https://my422081.s4hana.cloud.sap
+                User: SMARTORDER_COMM_USER
+                Password: 2\d+MyzYtWu\Gm6fR6VYSKn=@ksFl<GsYl-o5Ke]
+                sap-client: "100"
+                HTML5.DynamicDestination: true
+  # 4. Application Logging
+  - name: SmartOrder-logging
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: application-logs
+      service-plan: standard
+
+  # 5. HTML5 Repository — Hébergement SPA (app-host)
+  - name: SmartOrder-html5-repo-host
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-host
+
+  # 6. HTML5 Repository — Runtime
+  - name: SmartOrder-html5-runtime
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-runtime

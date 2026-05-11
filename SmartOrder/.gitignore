@@ -1,0 +1,41 @@
+# ==========================
+# SmartOrder — .gitignore
+# ==========================
+
+# Dépendances
+node_modules/
+ml-service/vendor/
+ml-service/__pycache__/
+ml-service/*.pyc
+
+# Environnement & secrets
+.env
+.env.local
+.env.*.local
+default-env.json
+
+# Build
+dist/
+gen/
+*.mtar
+mta_archives/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Modèles ML (fichiers lourds générés)
+ml-service/models_storage/*.pkl
+
+# Logs
+*.log
+npm-debug.log*
+
+# SAP BAS
+.kiro/
