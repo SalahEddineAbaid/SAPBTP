@@ -7,6 +7,7 @@
 const express = require('express');
 const cds = require('@sap/cds');
 const { getKPIs, getAnomalies } = require('../services/analyticsService');
+const { hasMinimumRole } = require('../utils/authz');
 
 const router = express.Router();
 const LOG = cds.log('analytics-route');
@@ -16,7 +17,7 @@ function requireRole(...roles) {
   return (req, res, next) => {
     const user = req.user;
     if (!user) return res.status(401).json({ error: 'Non authentifié' });
-    const hasRole = roles.some(r => user.is?.(r) || user.roles?.includes(r));
+    const hasRole = roles.some(r => hasMinimumRole(user, r));
     if (!hasRole) return res.status(403).json({ error: `Rôle requis : ${roles.join(' ou ')}` });
     next();
   };

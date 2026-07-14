@@ -1,6 +1,5 @@
-ID,code_sap,nom,pays,email,telephone,taux_retard_moyen,delai_moyen_jours,score_performance,actif
-aaaaaaaa-0001-0000-0000-000000000001,V001,Atlas Supplies SARL,MA,contact@atlas-supplies.ma,+212522001001,0.08,5.2,0.92,true
-aaaaaaaa-0002-0000-0000-000000000002,V002,Beta Industries SA,FR,contact@beta-industries.fr,+33144002002,0.31,9.8,0.62,true
-aaaaaaaa-0003-0000-0000-000000000003,V003,Casablanca Trading,MA,info@casa-trading.ma,+212522003003,0.15,6.5,0.82,true
-aaaaaaaa-0004-0000-0000-000000000004,V004,Euro Logistics GmbH,DE,info@euro-logistics.de,+4930004004,0.22,8.1,0.71,true
-aaaaaaaa-0005-0000-0000-000000000005,V005,Maroc Import Export,MA,contact@mie.ma,+212522005005,0.05,4.3,0.95,true
+ID,code_sap,nom,pays,email,telephone,taux_retard_moyen,delai_moyen_jours,score_performance,actif,derniere_sync,createdAt,updatedAt
+f1000001-0001-0001-0001-000000000001,BP001001,ACME Maroc Supply,MAR,contact@acme-maroc.ma,+212661000001,0.12,6,0.88,true,2025-05-01T06:00:00Z,2025-01-01T08:00:00Z,2025-05-01T06:00:00Z
+f1000001-0001-0001-0001-000000000002,BP001002,TechParts Europe,FRA,supply@techparts.fr,+33123000002,0.05,4,0.95,true,2025-05-01T06:00:00Z,2025-01-01T08:00:00Z,2025-05-01T06:00:00Z
+f1000001-0001-0001-0001-000000000003,BP001003,Global Industrie,ESP,info@global-ind.es,+34912000003,0.28,12,0.72,true,2025-05-01T06:00:00Z,2025-01-01T08:00:00Z,2025-05-01T06:00:00Z
+f1000001-0001-0001-0001-000000000004,BP001004,Sahara Logistics,DZA,ops@sahara-log.dz,+213555000004,0.08,8,0.91,true,2025-05-01T06:00:00Z,2025-01-01T08:00:00Z,2025-05-01T06:00:00Z

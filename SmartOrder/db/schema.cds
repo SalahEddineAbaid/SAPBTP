@@ -130,6 +130,15 @@ entity Utilisateurs {
   perimetre            : LargeString;
   actif                : Boolean     default true;
   derniere_connexion   : DateTime;
+  
+  // Profile fields
+  telephone            : String(30);
+  departement          : String(50);
+  avatar_url           : String(500);
+  
+  // Preferences (stored as JSON)
+  preferences          : LargeString;
+  
   createdAt            : DateTime;
   updatedAt            : DateTime;
   orders_managed       : Association to many Orders on orders_managed.manager = $self;
@@ -248,8 +257,8 @@ entity LignesCommande {
   code_produit            : String(40)    not null;
 
   // OData : PurchaseOrderItemText — "Short Text" (page 40)
-  // Longueur SAP standard = 40 chars
-  designation_produit     : String(40);
+  // Longueur SAP standard = 40 chars, avec marge pour textes custom/importés.
+  designation_produit     : String(80);
 
   // OData : OrderQuantity — "Order Quantity" (page 41)
   quantite_commandee      : Decimal(15,3) not null;
@@ -268,9 +277,9 @@ entity LignesCommande {
   // OData : ItemGrossWeight — "Gross Weight" (page 41)
   poids_total             : Decimal(10,3);
 
-  // OData : ArticleCategory — "Material Category" (page 40)
-  // Ce champ est au niveau ITEM, pas au header commande
-  categorie_article       : String(4);
+  // OData : MaterialGroup/ArticleCategory — champ item.
+  // Certains tenants YAAS exposent un groupe marchandise custom long (ex: ZPFDND).
+  categorie_article       : String(20);
 
   // OData : Plant — "Plant" (page 40)
   // Site/usine de livraison SAP
@@ -342,6 +351,7 @@ entity SyncJobs {
   depuis                  : DateTime;
   started_at              : DateTime;
   ended_at                : DateTime;
+  duree_ms                : Integer;
   error_message           : LargeString;
   createdAt               : DateTime;
 }

@@ -8,6 +8,11 @@ const express = require('express');
 const cds = require('@sap/cds');
 const { uuid } = cds.utils;
 const mlService = require('../../services/mlService');
+const {
+  csvFallbackEnabled,
+  isRecoverableDbError,
+  readMlModelsFallback,
+} = require('../../utils/csvFallback');
 
 const router = express.Router();
 const LOG = cds.log('admin-ml');
@@ -21,12 +26,33 @@ function isPostgres() {
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.user?.is?.('ADMIN') && !req.user?.roles?.includes('ADMIN')) {
-    return res.status(403).json({ error: 'Accès réservé aux administrateurs.' });
+  if (req.userRole === 'ADMIN' || req.user?.is?.('ADMIN') || req.user?.roles?.includes('ADMIN')) {
+    return next();
   }
-  next();
+  const scopes = [
+    ...(Array.isArray(req.user?.scopes) ? req.user.scopes : []),
+    ...(Array.isArray(req.user?.scope) ? req.user.scope : []),
+  ];
+  if (scopes.some((scope) => scope === 'ADMIN' || scope.endsWith('.ADMIN') || scope.endsWith('.admin.ml'))) {
+    return next();
+  }
+  return res.status(403).json({ error: 'Accès réservé aux administrateurs.' });
 }
 router.use(requireAdmin);
+
+router.get('/status', async (req, res) => {
+  try {
+    const mlHealth = await mlService.healthCheck();
+    res.json({
+      status: mlHealth?.status || 'operational',
+      version: mlHealth?.version || 'v1.0.0',
+      last_prediction: mlHealth?.last_prediction,
+    });
+  } catch (err) {
+    LOG.warn('Statut ML indisponible : %s', err.message);
+    res.json({ status: 'degraded', version: 'v1.0.0' });
+  }
+});
 
 // GET /api/admin/ml/models — Liste des modèles ML
 router.get('/models', async (req, res, next) => {
@@ -38,7 +64,15 @@ router.get('/models', async (req, res, next) => {
     `);
     const mlHealth = await mlService.healthCheck();
     res.json({ models, mlService: mlHealth });
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (csvFallbackEnabled()) {
+      const models = readMlModelsFallback().value;
+      const mlHealth = await mlService.healthCheck().catch(() => ({ status: 'degraded', version: 'v1.0.0' }));
+      res.set('x-smartorder-data-source', 'csv-fallback');
+      return res.json({ models, mlService: mlHealth });
+    }
+    next(err);
+  }
 });
 
 // POST /api/admin/ml/retrain — Déclencher réentraînement (UC16)

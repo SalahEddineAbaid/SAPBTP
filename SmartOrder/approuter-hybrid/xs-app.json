@@ -1,0 +1,79 @@
+{
+  "welcomeFile": "/index.html",
+  "authenticationMethod": "none",
+  "logout": {
+    "logoutEndpoint": "/do/logout",
+    "logoutPage": "/login"
+  },
+  "routes": [
+    {
+      "source": "^/api/health$",
+      "target": "/api/health",
+      "destination": "srv-api",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/api/me$",
+      "target": "/api/me",
+      "destination": "srv-api",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/api/oauth/callback(.*)$",
+      "target": "/api/oauth/callback$1",
+      "destination": "srv-api",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/api/login(.*)$",
+      "target": "/api/login$1",
+      "destination": "srv-api",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/api/(.*)$",
+      "target": "/api/$1",
+      "destination": "srv-api",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/odata/(.*)$",
+      "target": "/odata/$1",
+      "destination": "srv-api",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/socket.io/(.*)$",
+      "target": "/socket.io/$1",
+      "destination": "srv-api",
+      "authenticationType": "none"
+    },
+    {
+      "source": "^/oauth/callback(.*)$",
+      "target": "/oauth/callback$1",
+      "destination": "ui-local",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/ws(.*)$",
+      "target": "/ws$1",
+      "destination": "ui-local",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/(.*)$",
+      "target": "/$1",
+      "destination": "ui-local",
+      "authenticationType": "none",
+      "csrfProtection": false
+    }
+  ]
+}

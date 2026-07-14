@@ -5,6 +5,11 @@
  */
 const express = require('express');
 const cds = require('@sap/cds');
+const {
+  csvFallbackEnabled,
+  isRecoverableDbError,
+  readHistoryFallback,
+} = require('../../utils/csvFallback');
 
 const router = express.Router();
 const LOG = cds.log('admin-logs');
@@ -18,12 +23,76 @@ function isPostgres() {
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.user?.is?.('ADMIN') && !req.user?.roles?.includes('ADMIN')) {
-    return res.status(403).json({ error: 'Accès réservé aux administrateurs.' });
+  if (req.userRole === 'ADMIN' || req.user?.is?.('ADMIN') || req.user?.roles?.includes('ADMIN')) {
+    return next();
   }
-  next();
+  const scopes = [
+    ...(Array.isArray(req.user?.scopes) ? req.user.scopes : []),
+    ...(Array.isArray(req.user?.scope) ? req.user.scope : []),
+  ];
+  if (scopes.some((scope) => scope === 'ADMIN' || scope.endsWith('.ADMIN') || scope.endsWith('.admin.logs'))) {
+    return next();
+  }
+  return res.status(403).json({ error: 'Accès réservé aux administrateurs.' });
 }
 router.use(requireAdmin);
+
+router.get('/history', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 500);
+    const db = await cds.connect.to('db');
+    const pg = isPostgres();
+    const rows = await db.run(`
+      SELECT
+        hs.ID,
+        hs.commande_ID,
+        hs.user_ID,
+        hs.ancien_statut,
+        hs.nouveau_statut,
+        hs.commentaire,
+        hs.source_changement,
+        hs.createdAt,
+        u.username AS user_username,
+        u.email AS user_email,
+        o.numero_sap AS commande_numero_sap
+      FROM smartorder_HistoriqueStatut hs
+      LEFT JOIN smartorder_Utilisateurs u ON u.ID = hs.user_ID
+      LEFT JOIN smartorder_Orders o ON o.ID = hs.commande_ID
+      ORDER BY hs.createdAt DESC
+      LIMIT ${pg ? '$1' : '?'}
+    `, [limit]);
+
+    res.json({
+      value: rows.map((row) => ({
+        ID: row.ID,
+        commande_ID: row.commande_ID,
+        user_ID: row.user_ID,
+        ancien_statut: row.ancien_statut,
+        nouveau_statut: row.nouveau_statut,
+        commentaire: row.commentaire,
+        source_changement: row.source_changement,
+        createdAt: row.createdAt,
+        user: row.user_ID ? {
+          ID: row.user_ID,
+          username: row.user_username,
+          email: row.user_email,
+        } : null,
+        commande: row.commande_ID ? {
+          ID: row.commande_ID,
+          numero_sap: row.commande_numero_sap,
+        } : null,
+      })),
+    });
+  } catch (err) {
+    LOG.error('Erreur historique logs : %s', err.message);
+    if (csvFallbackEnabled()) {
+      const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 500);
+      res.set('x-smartorder-data-source', 'csv-fallback');
+      return res.json(readHistoryFallback({ top: limit }));
+    }
+    next(err);
+  }
+});
 
 // GET /api/admin/logs
 router.get('/', async (req, res, next) => {
@@ -105,6 +174,32 @@ router.get('/', async (req, res, next) => {
     });
   } catch (err) {
     LOG.error('Erreur logs : %s', err.message);
+    if (csvFallbackEnabled()) {
+      const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 500);
+      const history = readHistoryFallback({ top: limit }).value;
+      const logs = history.map((row) => ({
+        ID: row.ID,
+        source: 'AUDIT',
+        niveau: 'INFO',
+        timestamp: row.createdAt,
+        utilisateur: row.user?.username || null,
+        email_utilisateur: row.user?.email || null,
+        reference: row.commande?.numero_sap || null,
+        message: `Statut change : ${row.ancien_statut || '-'} -> ${row.nouveau_statut || '-'}`,
+        commentaire: row.commentaire,
+        source_changement: row.source_changement,
+      }));
+      res.set('x-smartorder-data-source', 'csv-fallback');
+      return res.json({
+        logs,
+        pagination: {
+          total: logs.length,
+          page: parseInt(req.query.page || '1', 10),
+          limit,
+          pages: 1,
+        },
+      });
+    }
     next(err);
   }
 });

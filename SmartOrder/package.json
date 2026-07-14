@@ -5,10 +5,10 @@
   "repository": "<Add your repository here>",
   "license": "UNLICENSED",
   "private": true,
-
   "dependencies": {
-    "@sap/cds": "^8",
-    "@sap/cds-dk": "^8",
+    "@sap/cds": "^8.9.10",
+    "@sap-cloud-sdk/http-client": "^3",
+    "@sap-cloud-sdk/resilience": "^3",
     "@cap-js/postgres": "^1",
     "@sap/xssec": "^4",
     "@sap/xsenv": "^5",
@@ -23,64 +23,165 @@
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
     "@sap/audit-logging": "^5",
-    "hdb": "^0.19.10",
+    "pg": "^8.14.1",
     "dotenv": "^16.3.1"
   },
-
   "devDependencies": {
+    "@sap/cds-dk": "^8.9.10",
     "@cap-js/sqlite": "^1",
     "jest": "^29.7.0",
     "supertest": "^6.3.3",
-    "eslint": "^10.0.0"
+    "eslint": "^10.0.0",
+    "concurrently": "^8.2.2"
   },
-
   "scripts": {
-    "start":      "cds-serve",
-    "dev":        "cds watch",
-    "build":      "cds build",
-    "deploy:db":  "cds deploy --to postgres",
-    "test":       "jest --coverage --forceExit",
-    "lint":       "eslint srv/"
+    "start": "cds-serve",
+    "dev": "cds watch",
+    "hybrid": "HOST=127.0.0.1 NODE_ENV=production USE_MOCK_AUTH=false SMARTORDER_ALLOW_UNAUTH_CSV=true SMARTORDER_ENABLE_DEV_ADMIN=true SMARTORDER_DEV_ADMINS=k.nadi@yaas.ma SMARTORDER_CSV_FALLBACK=true SMARTORDER_READ_SOURCE=csv SMARTORDER_READ_TIMEOUT_MS=30000 SMARTORDER_PG_CONNECT_TIMEOUT_MS=25000 SMARTORDER_PG_POOL_MAX=5 SMARTORDER_PG_IDLE_TIMEOUT_MS=30000 SMARTORDER_PG_ACQUIRE_TIMEOUT_MS=30000 SMARTORDER_PG_QUERY_TIMEOUT_MS=60000 SMARTORDER_PG_STATEMENT_TIMEOUT_MS=120000 NODE_OPTIONS=\"--max-http-header-size=262144\" cds watch --profile hybrid",
+    "hybrid:serve": "HOST=127.0.0.1 NODE_ENV=production USE_MOCK_AUTH=false SMARTORDER_ALLOW_UNAUTH_CSV=true SMARTORDER_ENABLE_DEV_ADMIN=true SMARTORDER_DEV_ADMINS=k.nadi@yaas.ma SMARTORDER_CSV_FALLBACK=true SMARTORDER_READ_SOURCE=csv SMARTORDER_READ_TIMEOUT_MS=30000 SMARTORDER_PG_CONNECT_TIMEOUT_MS=25000 SMARTORDER_PG_POOL_MAX=5 SMARTORDER_PG_IDLE_TIMEOUT_MS=30000 SMARTORDER_PG_ACQUIRE_TIMEOUT_MS=30000 SMARTORDER_PG_QUERY_TIMEOUT_MS=60000 SMARTORDER_PG_STATEMENT_TIMEOUT_MS=120000 NODE_OPTIONS=\"--max-http-header-size=262144\" cds serve all --profile hybrid",
+    "hybrid:auto": "HOST=127.0.0.1 NODE_ENV=production USE_MOCK_AUTH=false SMARTORDER_ALLOW_UNAUTH_CSV=true SMARTORDER_ENABLE_DEV_ADMIN=true SMARTORDER_DEV_ADMINS=k.nadi@yaas.ma SMARTORDER_CSV_FALLBACK=true SMARTORDER_READ_SOURCE=auto SMARTORDER_READ_TIMEOUT_MS=30000 SMARTORDER_PG_CONNECT_TIMEOUT_MS=25000 SMARTORDER_PG_POOL_MAX=5 SMARTORDER_PG_IDLE_TIMEOUT_MS=30000 SMARTORDER_PG_ACQUIRE_TIMEOUT_MS=30000 SMARTORDER_PG_QUERY_TIMEOUT_MS=60000 SMARTORDER_PG_STATEMENT_TIMEOUT_MS=120000 NODE_OPTIONS=\"--max-http-header-size=262144\" cds watch --profile hybrid",
+    "hybrid:neon": "HOST=127.0.0.1 NODE_ENV=production USE_MOCK_AUTH=false SMARTORDER_ALLOW_UNAUTH_CSV=true SMARTORDER_ENABLE_DEV_ADMIN=true SMARTORDER_DEV_ADMINS=k.nadi@yaas.ma SMARTORDER_CSV_FALLBACK=false SMARTORDER_READ_SOURCE=postgres SMARTORDER_READ_TIMEOUT_MS=30000 SMARTORDER_PG_CONNECT_TIMEOUT_MS=25000 SMARTORDER_PG_POOL_MAX=5 SMARTORDER_PG_IDLE_TIMEOUT_MS=30000 SMARTORDER_PG_ACQUIRE_TIMEOUT_MS=30000 SMARTORDER_PG_QUERY_TIMEOUT_MS=60000 SMARTORDER_PG_STATEMENT_TIMEOUT_MS=120000 NODE_OPTIONS=\"--max-http-header-size=262144\" cds watch --profile hybrid",
+    "hybrid:approuter": "cds bind --profile hybrid --exec -- npm --prefix approuter-hybrid start",
+    "hybrid:all": "concurrently -k -n cds,ui,router -c blue,green,magenta \"npm run hybrid\" \"npm --prefix app/orders-ui run start:xsuaa\" \"npm run hybrid:approuter\"",
+    "neon:bind:direct": "bash scripts/neon-direct-cups.sh",
+    "neon:check": "NODE_ENV=production cds bind --profile hybrid --exec -- node scripts/neon-check.js",
+    "neon:init": "NODE_ENV=production cds bind --profile hybrid --exec -- node scripts/neon-init-schema.js",
+    "neon:reset": "NODE_ENV=production cds bind --profile hybrid --exec -- node scripts/neon-init-schema.js --reset",
+    "neon:deploy": "NODE_ENV=production cds bind --profile hybrid --exec -- cds deploy --to postgres --profile hybrid",
+    "build": "cds build",
+    "deploy:db": "cds deploy --to postgres",
+    "test": "jest --coverage --forceExit",
+    "lint": "eslint srv/"
   },
-
   "cds": {
     "requires": {
       "db": {
         "kind": "postgres",
         "[development]": {
           "kind": "sqlite",
-          "credentials": { "url": "db.sqlite" }
+          "credentials": {
+            "url": ":memory:"
+          }
         },
         "[hybrid]": {
-          "kind": "postgres"
+          "kind": "postgres",
+          "credentials": {},
+          "pool": {
+            "min": 0,
+            "max": 2,
+            "acquireTimeoutMillis": 10000,
+            "destroyTimeoutMillis": 5000,
+            "idleTimeoutMillis": 15000
+          },
+          "client": {
+            "connectionTimeoutMillis": 15000,
+            "query_timeout": 45000,
+            "statement_timeout": 60000,
+            "keepAlive": true,
+            "keepAliveInitialDelayMillis": 10000,
+            "enableChannelBinding": true,
+            "ssl": {
+              "rejectUnauthorized": false
+            }
+          }
         }
       },
       "auth": {
         "kind": "xsuaa",
+        "[hybrid]": {
+          "kind": "xsuaa"
+        },
         "[development]": {
           "kind": "mocked",
           "users": {
             "admin": {
               "password": "admin",
-              "roles": ["ADMIN"],
-              "attributes": { "username": "admin", "email": "admin@yaas.ma" }
+              "roles": [
+                "ADMIN",
+                "admin.users",
+                "admin.sync",
+                "dashboard.read",
+                "authenticated-user"
+              ],
+              "attributes": {
+                "username": "admin",
+                "email": "admin@yaas.ma"
+              }
             },
             "manager": {
               "password": "manager",
-              "roles": ["MANAGER"],
-              "attributes": { "username": "m.benali", "email": "m.benali@yaas.ma" }
+              "roles": [
+                "MANAGER",
+                "analytics.read",
+                "dashboard.read",
+                "authenticated-user"
+              ],
+              "attributes": {
+                "username": "m.benali",
+                "email": "m.benali@yaas.ma"
+              }
             },
             "user": {
               "password": "user",
-              "roles": ["USER"],
-              "attributes": { "username": "y.alami", "email": "y.alami@yaas.ma" }
+              "roles": [
+                "USER",
+                "authenticated-user"
+              ],
+              "attributes": {
+                "username": "y.alami",
+                "email": "y.alami@yaas.ma"
+              }
+            },
+            "k.nadi@yaas.ma": {
+              "password": "",
+              "roles": [
+                "ADMIN",
+                "MANAGER",
+                "USER",
+                "admin.users",
+                "admin.sync",
+                "dashboard.read",
+                "analytics.read",
+                "authenticated-user"
+              ],
+              "attributes": {
+                "username": "k.nadi",
+                "email": "k.nadi@yaas.ma"
+              }
+            },
+            "*": {
+              "roles": [
+                "ADMIN",
+                "MANAGER",
+                "USER",
+                "admin.users",
+                "admin.sync",
+                "dashboard.read",
+                "analytics.read",
+                "authenticated-user"
+              ],
+              "attributes": {
+                "username": "dev-user"
+              }
             }
           }
         }
       },
-      "destinations": { "kind": "destinations" },
-      "html5-repo": { "kind": "html5-repo-runtime" },
-      "logging": { "kind": "application-logging" }
+      "SAP_ERP": {
+        "kind": "odata-v4",
+        "credentials": {
+          "destination": "SAP_ERP"
+        }
+      },
+      "destinations": {
+        "kind": "destinations"
+      },
+      "html5-repo": {
+        "kind": "html5-repo-runtime"
+      },
+      "logging": {
+        "kind": "application-logging"
+      }
     },
     "server": "./server.js",
     "features": {
@@ -91,14 +192,14 @@
       "target": "gen"
     }
   },
-
   "jest": {
     "testEnvironment": "node",
     "coverageDirectory": "coverage",
-    "testMatch": ["**/__tests__/**/*.test.js"],
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
     "testTimeout": 30000
   },
-
   "engines": {
     "node": ">=20.0.0"
   }

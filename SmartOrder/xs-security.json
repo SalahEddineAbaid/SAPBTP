@@ -2,21 +2,64 @@
   "xsappname": "smartorder",
   "tenant-mode": "dedicated",
   "description": "SmartOrder — Application intelligente de gestion des commandes YAAS",
-
   "scopes": [
-    { "name": "$XSAPPNAME.orders.read",      "description": "Consulter les commandes" },
-    { "name": "$XSAPPNAME.orders.write",     "description": "Modifier les statuts des commandes" },
-    { "name": "$XSAPPNAME.dashboard.read",   "description": "Accéder au dashboard KPIs" },
-    { "name": "$XSAPPNAME.predictions.view", "description": "Voir les prédictions IA" },
-    { "name": "$XSAPPNAME.analytics.read",   "description": "Accéder aux analyses d'anomalies" },
-    { "name": "$XSAPPNAME.export.csv",       "description": "Exporter les commandes en CSV" },
-    { "name": "$XSAPPNAME.admin.users",      "description": "Gérer les utilisateurs" },
-    { "name": "$XSAPPNAME.admin.roles",      "description": "Attribuer les rôles" },
-    { "name": "$XSAPPNAME.admin.logs",       "description": "Consulter les logs système" },
-    { "name": "$XSAPPNAME.admin.sync",       "description": "Déclencher la synchronisation SAP" },
-    { "name": "$XSAPPNAME.admin.ml",         "description": "Recalculer les modèles ML" }
+    {
+      "name": "$XSAPPNAME.orders.read",
+      "description": "Consulter les commandes"
+    },
+    {
+      "name": "$XSAPPNAME.orders.write",
+      "description": "Modifier les statuts des commandes"
+    },
+    {
+      "name": "$XSAPPNAME.dashboard.read",
+      "description": "Accéder au dashboard KPIs"
+    },
+    {
+      "name": "$XSAPPNAME.predictions.view",
+      "description": "Voir les prédictions IA"
+    },
+    {
+      "name": "$XSAPPNAME.analytics.read",
+      "description": "Accéder aux analyses d'anomalies"
+    },
+    {
+      "name": "$XSAPPNAME.export.csv",
+      "description": "Exporter les commandes en CSV"
+    },
+    {
+      "name": "$XSAPPNAME.admin.users",
+      "description": "Gérer les utilisateurs"
+    },
+    {
+      "name": "$XSAPPNAME.admin.roles",
+      "description": "Attribuer les rôles"
+    },
+    {
+      "name": "$XSAPPNAME.admin.logs",
+      "description": "Consulter les logs système"
+    },
+    {
+      "name": "$XSAPPNAME.admin.sync",
+      "description": "Déclencher la synchronisation SAP"
+    },
+    {
+      "name": "$XSAPPNAME.admin.ml",
+      "description": "Recalculer les modèles ML"
+    },
+    {
+      "name": "$XSAPPNAME.USER",
+      "description": "USER"
+    },
+    {
+      "name": "$XSAPPNAME.MANAGER",
+      "description": "MANAGER"
+    },
+    {
+      "name": "$XSAPPNAME.ADMIN",
+      "description": "ADMIN"
+    }
   ],
-
   "attributes": [
     {
       "name": "username",
@@ -34,20 +77,25 @@
       "valueType": "string"
     }
   ],
-
   "role-templates": [
     {
       "name": "USER",
       "description": "Utilisateur standard — consultation des commandes",
       "scope-references": [
+        "$XSAPPNAME.USER",
         "$XSAPPNAME.orders.read"
       ],
-      "attribute-references": ["username", "email"]
+      "attribute-references": [
+        "username",
+        "email"
+      ]
     },
     {
       "name": "MANAGER",
       "description": "Manager — gestion et analyse des commandes",
       "scope-references": [
+        "$XSAPPNAME.USER",
+        "$XSAPPNAME.MANAGER",
         "$XSAPPNAME.orders.read",
         "$XSAPPNAME.orders.write",
         "$XSAPPNAME.dashboard.read",
@@ -55,12 +103,19 @@
         "$XSAPPNAME.analytics.read",
         "$XSAPPNAME.export.csv"
       ],
-      "attribute-references": ["username", "email", "perimetre"]
+      "attribute-references": [
+        "username",
+        "email",
+        "perimetre"
+      ]
     },
     {
       "name": "ADMIN",
       "description": "Administrateur — accès complet",
       "scope-references": [
+        "$XSAPPNAME.USER",
+        "$XSAPPNAME.MANAGER",
+        "$XSAPPNAME.ADMIN",
         "$XSAPPNAME.orders.read",
         "$XSAPPNAME.orders.write",
         "$XSAPPNAME.dashboard.read",
@@ -73,10 +128,12 @@
         "$XSAPPNAME.admin.sync",
         "$XSAPPNAME.admin.ml"
       ],
-      "attribute-references": ["username", "email"]
+      "attribute-references": [
+        "username",
+        "email"
+      ]
     }
   ],
-
   "role-collections": [
     {
       "name": "SmartOrder_User",
@@ -100,12 +157,24 @@
       ]
     }
   ],
-
   "oauth2-configuration": {
     "token-validity": 3600,
+    "grant-types": [
+      "authorization_code",
+      "password",
+      "client_credentials"
+    ],
     "redirect-uris": [
       "https://*.hana.ondemand.com/**",
-      "http://localhost:5000/**"
+      "https://*.applicationstudio.cloud.sap/**",
+      "https://port5000-*.applicationstudio.cloud.sap/**",
+      "http://localhost:5000/**",
+      "http://localhost:4004/**",
+      "http://localhost:5000/api/oauth/callback",
+      "http://localhost:4004/api/oauth/callback",
+      "http://localhost:4004/api/login/callback",
+      "http://localhost:3001/login/callback",
+      "http://localhost:3002/login/callback"
     ]
   }
 }

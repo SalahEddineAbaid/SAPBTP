@@ -43,6 +43,7 @@ modules:
       - name: SmartOrder-postgres
       - name: SmartOrder-destination
       - name: SmartOrder-logging
+      - name: SmartOrder-jobscheduler
 
   # ----------------------------------------------------------
   # 2. DB Deployer (CDS → PostgreSQL)
@@ -86,8 +87,6 @@ modules:
     properties:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
-    requires:
-      - name: SmartOrder-postgres
     provides:
       - name: ml-api
         properties:
@@ -163,12 +162,9 @@ resources:
     requires:
       - name: app-api
 
-  # 2. PostgreSQL — Base de données
+  # 2. PostgreSQL externe — service user-provided cree avec cf cups
   - name: SmartOrder-postgres
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: postgresql-db
-      service-plan: development
+    type: org.cloudfoundry.existing-service
 
   # 3. SAP Destination Service
   - name: SmartOrder-destination
@@ -211,3 +207,14 @@ resources:
     parameters:
       service: html5-apps-repo
       service-plan: app-runtime
+
+  # 7. SAP Job Scheduling Service — Planification cloud-native
+  #    Remplace node-cron (incompatible multi-instance CF)
+  #    Plan : standard (jobs HTTP, cron expressions, historique)
+  - name: SmartOrder-jobscheduler
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: jobscheduler
+      service-plan: standard
+      config:
+        enable-xsuaa-support: true

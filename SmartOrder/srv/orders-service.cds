@@ -36,18 +36,19 @@ using smartorder from '../db/schema';
 @requires: 'authenticated-user'
 service OrdersService {
 
-  // Commandes — lecture + actions bound
+  // Commandes — CRUD complet + actions bound
+  // CREATE/UPDATE/DELETE réservés aux rôles MANAGER et ADMIN
   // Filtrable par : statut, urgence, montant_total, date_creation,
   //                 date_previsionnelle, score_priorite, fournisseur_ID,
   //                 company_code, purchasing_org
   // Triable par   : toutes les colonnes exposées
   // Searchable    : numero_sap (géré par le handler JS)
-  @readonly
   entity Orders as projection on smartorder.Orders
     actions {
       // UC07 — Changer le statut d'une commande (avec validation State_Machine)
       // Exige un commentaire obligatoire (min 5 caractères)
       // Crée un enregistrement HistoriqueStatut comme audit trail
+      // Propage le changement vers SAP S/4HANA automatiquement
       action changerStatut(
         statut      : smartorder.StatutEnum,
         commentaire : String(2000)
@@ -57,6 +58,28 @@ service OrdersService {
       action recalculerPrediction() returns Predictions;
     };
 
+  // Action unbound — Créer une commande avec sync SAP automatique
+  // Retourne la commande créée avec le numero_sap SAP confirmé
+  action createOrder(
+    type            : String(4),
+    fournisseur_ID  : UUID,
+    company_code    : String(4),
+    purchasing_org  : String(4),
+    purchasing_group: String(3),
+    devise          : String(5),
+    urgence         : smartorder.UrgenceEnum,
+    date_previsionnelle : Date,
+    date_commande   : Date,
+    lignes          : array of {
+      code_produit        : String(40);
+      designation_produit : String(40);
+      quantite_commandee  : Decimal(15,3);
+      prix_unitaire       : Decimal(15,2);
+      unite               : String(6);
+      plant               : String(4);
+    }
+  ) returns Orders;
+
   // Fournisseurs — lecture seule pour les utilisateurs
   @readonly
   entity Fournisseurs as projection on smartorder.Fournisseurs;
@@ -65,7 +88,7 @@ service OrdersService {
   @readonly
   entity Predictions as projection on smartorder.Predictions;
 
-  // Alertes — lecture + acquittement
+  // Alertes — lecture + acquittement (MANAGER + ADMIN uniquement)
   entity Alertes as projection on smartorder.Alertes
     excluding { details }
     actions {
@@ -75,13 +98,18 @@ service OrdersService {
   // Historique — lecture seule (audit trail immuable)
   @readonly
   entity HistoriqueStatut as projection on smartorder.HistoriqueStatut;
+
+  // Utilisateurs — lecture seule pour affichage dans l'historique
+  @readonly
+  entity Utilisateurs as projection on smartorder.Utilisateurs
+    excluding { xsuaa_user_id, preferences };
 }
 
 // ============================================================
 // SERVICE ANALYTIQUE — Dashboard & Anomalies (MANAGER + ADMIN)
 // ============================================================
 @path: '/odata/v4/analytics'
-@requires: [ 'MANAGER', 'ADMIN' ]
+@requires: 'authenticated-user'
 service AnalyticsService {
 
   // Vue commandes avec champs analytiques
@@ -101,7 +129,7 @@ service AnalyticsService {
 // SERVICE ADMIN — Gestion utilisateurs, logs, sync (ADMIN seul)
 // ============================================================
 @path: '/odata/v4/admin'
-@requires: 'ADMIN'
+@requires: 'authenticated-user'
 service AdminService {
 
   // CRUD Utilisateurs (UC12 + UC13)
@@ -113,6 +141,14 @@ service AdminService {
       ) returns Utilisateurs;
     };
 
+  // Historique complet pour audit admin (avec associations)
+  @readonly
+  entity HistoriqueStatut as projection on smartorder.HistoriqueStatut;
+
+  // Orders (lecture seule) — Nécessaire pour la navigation depuis HistoriqueStatut
+  @readonly
+  entity Orders as projection on smartorder.Orders;
+
   // Jobs de synchronisation SAP
   @readonly
   entity SyncJobs as projection on smartorder.SyncJobs;
@@ -120,4 +156,17 @@ service AdminService {
   // Modèles ML
   @readonly
   entity MlModels as projection on smartorder.MlModels;
+}
+
+// ============================================================
+// SERVICE PROFILE — Gestion du profil utilisateur (tous les rôles)
+// ============================================================
+@path: '/odata/v4/profile'
+@requires: 'authenticated-user'
+service ProfileService {
+
+  // Profil de l'utilisateur connecté (lecture seule via OData)
+  @readonly
+  entity MonProfil as projection on smartorder.Utilisateurs
+    excluding { xsuaa_user_id };
 }

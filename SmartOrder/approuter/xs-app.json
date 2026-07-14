@@ -23,8 +23,7 @@
       "source": "^/socket.io/(.*)$",
       "target": "/socket.io/$1",
       "destination": "srv-api",
-      "authenticationType": "xsuaa",
-      "websocketUpgrade": true
+      "authenticationType": "xsuaa"
     },
     {
       "source": "^/(.*)$",

@@ -101,7 +101,7 @@ function initSocket(httpServer) {
     });
   });
 
-  LOG.info('✅ Socket.io initialisé — cors=%s', corsOrigin);
+  LOG.info(`✅ Socket.io initialisé — cors=${corsOrigin}`);
   return io;
 }
 

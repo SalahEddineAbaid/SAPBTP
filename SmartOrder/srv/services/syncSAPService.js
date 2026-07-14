@@ -3,31 +3,87 @@
 const cds = require('@sap/cds');
 const { uuid } = cds.utils;
 const LOG = cds.log('sap-sync');
+const {
+  normalizeCountryCode,
+  recalculateSupplierMetrics,
+} = require('./supplierService');
 
 // ---------------------------------------------------------------------------
-// Helper : compatibilité SQLite (dev) / PostgreSQL (production)
+// SQL compatible PostgreSQL et SQLite pour le mode hybrid BAS/local.
 // ---------------------------------------------------------------------------
 function isPostgres() {
-  try {
-    const db = cds.env.requires?.db;
-    const kind = db?.kind || db?.[process.env.NODE_ENV]?.kind || 'sqlite';
-    return kind === 'postgres' || kind === 'postgresql';
-  } catch { return false; }
+  const db = cds.env.requires?.db || {};
+  const kind = db.kind || db[process.env.NODE_ENV]?.kind || 'sqlite';
+  return kind === 'postgres' || kind === 'postgresql';
 }
 
-/**
- * dbRun — Wrapper autour de db.run() qui convertit les placeholders $N → ?
- * pour SQLite, tout en gardant $N pour PostgreSQL en production.
- * Utilisation : await dbRun(db, `SELECT ... WHERE id = $1`, [id]);
- */
-function dbRun(db, query, params = []) {
-  if (!isPostgres()) {
-    // Convertir $1,$2,... en ? pour SQLite
-    query = query.replace(/\$\d+/g, '?');
-    // Convertir TRUE/FALSE littéraux en 1/0
-    query = query.replace(/\bTRUE\b/g, '1').replace(/\bFALSE\b/g, '0');
+function p(index) {
+  return isPostgres() ? `$${index}` : '?';
+}
+
+function scalar(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (['string', 'number', 'bigint'].includes(typeof value)) return value;
+  if (Buffer.isBuffer(value)) return value;
+  if (Array.isArray(value)) return value.length ? scalar(value[0], fallback) : fallback;
+  if (typeof value === 'object') {
+    if ('value' in value) return scalar(value.value, fallback);
+    if ('Value' in value) return scalar(value.Value, fallback);
+    if ('results' in value) return scalar(value.results, fallback);
+    if ('Name' in value) return scalar(value.Name, fallback);
+    if ('Description' in value) return scalar(value.Description, fallback);
+    return JSON.stringify(value);
   }
-  return db.run(query, params);
+  return String(value);
+}
+
+function text(value, fallback = null) {
+  const v = scalar(value, fallback);
+  return v === null || v === undefined ? fallback : String(v).trim();
+}
+
+function limitText(value, maxLength, fallback = null) {
+  const raw = text(value, fallback);
+  if (raw === null || raw === undefined) return fallback;
+  return raw.length > maxLength ? raw.slice(0, maxLength) : raw;
+}
+
+function bind(values) {
+  return values.map((value) => scalar(value));
+}
+
+function parseBoolean(value) {
+  const raw = scalar(value);
+  if (raw === true || raw === 1) return true;
+  if (raw === false || raw === 0) return false;
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (['true', 'x', '1', 'yes', 'y'].includes(normalized)) return true;
+    if (['false', '', '0', 'no', 'n'].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function mapApprovalStatus(sapOrder) {
+  // 1. Vérifier le champ explicite ReleaseStatus
+  const releaseStatus = text(sapOrder.ReleaseStatus || sapOrder.PurgReleaseSequenceStatus, '');
+  if (releaseStatus) return releaseStatus;
+
+  // 2. Vérifier ReleaseIsNotCompleted (booléen inversé)
+  const releaseIsNotCompleted = parseBoolean(sapOrder.ReleaseIsNotCompleted);
+  if (releaseIsNotCompleted === false) return 'X'; // Approuvée
+  if (releaseIsNotCompleted === true) return '';    // En attente
+
+  // 3. Vérifier le statut de processing — si la commande est en cours
+  //    de traitement (03+), elle est implicitement approuvée
+  const processingStatus = text(sapOrder.PurchasingProcessingStatus, '');
+  const statusNum = parseInt(processingStatus, 10);
+  if (!isNaN(statusNum) && statusNum >= 3) return 'X';
+
+  // 4. Défaut : en attente
+  return '';
 }
 
 // ===========================================================================
@@ -146,6 +202,7 @@ function parseODataResponse(odataResponse) {
  * @returns {{ value: string|null, error: string|null }}
  */
 function parseDate(value, fieldName) {
+  value = scalar(value);
   if (!value && value !== 0) {
     return { value: null, error: null }; // champ optionnel
   }
@@ -189,6 +246,7 @@ function parseDate(value, fieldName) {
  */
 function parseDecimal(value, fieldName, opts = {}) {
   const { allowNegative = false, defaultValue = 0 } = opts;
+  value = scalar(value);
 
   if (value === null || value === undefined || value === '') {
     return { value: defaultValue, error: null };
@@ -216,7 +274,7 @@ function parseDecimal(value, fieldName, opts = {}) {
  * Valide qu'un champ obligatoire est présent et non vide.
  */
 function validateRequired(sapOrder, field) {
-  const val = sapOrder[field];
+  const val = scalar(sapOrder[field]);
   if (val === null || val === undefined || (typeof val === 'string' && val.trim() === '')) {
     return `Champ obligatoire manquant : "${field}".`;
   }
@@ -248,14 +306,14 @@ function mapSAPOrderToCDS(sapOrder) {
   }
 
   // 2. Mapper le statut SAP → StatutEnum CDS
-  const sapStatus = String(sapOrder.PurchasingProcessingStatus).padStart(2, '0');
+  const sapStatus = text(sapOrder.PurchasingProcessingStatus, '').padStart(2, '0');
   const statut = SAP_STATUS_MAP[sapStatus];
   if (!statut) {
     warnings.push(`Statut SAP inconnu "${sapStatus}" — défaut: EN_ATTENTE.`);
   }
 
   // 3. Mapper le type de commande — stocke le code SAP brut
-  const type = (sapOrder.PurchaseOrderType || 'NB').trim();
+  const type = text(sapOrder.PurchaseOrderType, 'NB');
   if (!VALID_SAP_TYPES.includes(type)) {
     warnings.push(`Type de commande SAP inconnu "${type}" — stocké tel quel.`);
   }
@@ -270,17 +328,24 @@ function mapSAPOrderToCDS(sapOrder) {
   const dateModification = parseDate(sapOrder.LastChangeDateTime, 'LastChangeDateTime');
   if (dateModification.error) warnings.push(dateModification.error);
 
-  // Date prévisionnelle : DeliveryDate ou ScheduleLineDeliveryDate
-  const rawDatePrev = sapOrder.RequestedDeliveryDate
+  // Date prévisionnelle — source confirmée par CE_PURCHASEORDER_0001.cds :
+  // PurchaseOrderScheduleLine.ScheduleLineDeliveryDate (via _PurchaseOrderScheduleLineTP)
+  // Pas de RequestedDeliveryDate au niveau header PO dans cette API.
+  const firstItemScheduleLines = Array.isArray(sapOrder._PurchaseOrderItem)
+    ? (sapOrder._PurchaseOrderItem[0]?._PurchaseOrderScheduleLineTP || [])
+    : [];
+  const firstScheduleLine = firstItemScheduleLines[0] || {};
+  const rawDatePrev = firstScheduleLine.ScheduleLineDeliveryDate
     || sapOrder.ScheduleLineDeliveryDate
+    || sapOrder.RequestedDeliveryDate
     || sapOrder.DeliveryDate;
-  const datePrevisionnelle = parseDate(rawDatePrev, 'RequestedDeliveryDate');
+  const datePrevisionnelle = parseDate(rawDatePrev, 'ScheduleLineDeliveryDate');
   if (!datePrevisionnelle.value) {
-    // Si pas de date prévisionnelle, utiliser date création + 14 jours
+    // Fallback : date création + 14 jours (schedule line non expandée)
     const fallback = dateCreation.value ? new Date(dateCreation.value) : new Date();
     fallback.setDate(fallback.getDate() + 14);
     datePrevisionnelle.value = fallback.toISOString().split('T')[0];
-    warnings.push('RequestedDeliveryDate absente — défaut: date_creation + 14 jours.');
+    warnings.push('ScheduleLineDeliveryDate absente — défaut: date_creation + 14 jours.');
   }
 
   // 5. Parser le montant total
@@ -292,16 +357,17 @@ function mapSAPOrderToCDS(sapOrder) {
 
   // 6. Déterminer l'urgence basée sur le montant et la date
   let urgence = 'NORMALE';
-  if (montant.value > 500000 || sapOrder.Priority === 'HIGH') {
+  const priority = text(sapOrder.Priority, '').toUpperCase();
+  if (montant.value > 500000 || priority === 'HIGH') {
     urgence = 'CRITIQUE';
-  } else if (montant.value > 100000 || sapOrder.Priority === 'MEDIUM') {
+  } else if (montant.value > 100000 || priority === 'MEDIUM') {
     urgence = 'HAUTE';
   }
 
   // 7. Construire l'entité CDS Order
   const now = new Date().toISOString();
   const order = {
-    numero_sap: String(sapOrder.PurchaseOrder).trim(),
+    numero_sap: text(sapOrder.PurchaseOrder, ''),
     type: type,
     statut: statut || 'EN_ATTENTE',
     urgence: urgence,
@@ -314,16 +380,16 @@ function mapSAPOrderToCDS(sapOrder) {
       : null,
     date_modification: dateModification.value || now,
     montant_total: montant.value,
-    devise: (sapOrder.DocumentCurrency || 'EUR').trim().toUpperCase(),
+    devise: text(sapOrder.DocumentCurrency, 'EUR').toUpperCase(),
     score_priorite: 0, // calculé par ML ensuite
     // Champs organisationnels SAP
-    company_code: (sapOrder.CompanyCode || '').trim() || null,
-    purchasing_org: (sapOrder.PurchasingOrganization || '').trim() || null,
-    purchasing_group: (sapOrder.PurchasingGroup || '').trim() || null,
-    marqueur_suppression: sapOrder.PurOrderIsMarkedForDeletion === true
-      || sapOrder.PurchaseOrderDeletionCode === 'L',
+    company_code: text(sapOrder.CompanyCode) || null,
+    purchasing_org: text(sapOrder.PurchasingOrganization) || null,
+    purchasing_group: text(sapOrder.PurchasingGroup) || null,
+    marqueur_suppression: parseBoolean(sapOrder.PurOrderIsMarkedForDeletion) === true
+      || text(sapOrder.PurchaseOrderDeletionCode) === 'L',
     // Champs ajoutés depuis analyse S/4HANA Cloud YAAS
-    statut_approbation: (sapOrder.ReleaseStatus || '').trim(),
+    statut_approbation: mapApprovalStatus(sapOrder),
     date_commande: (dateDocument.value || dateCreation.value || now).split('T')[0],
     postes_en_retard: 0, // calculé après import des lignes
     createdAt: now,
@@ -331,12 +397,24 @@ function mapSAPOrderToCDS(sapOrder) {
   };
 
   // 8. Extraire les infos fournisseur (pour UPSERT)
+  // Source confirmée par CE_PURCHASEORDER_0001.cds :
+  //   _SupplierAddress (Composition of one PurchaseOrderSupplierAddress)
+  //     └── OrganizationName1  = Nom 1 du fournisseur (ex: "FRS 8")
+  //     └── Country            = Pays ISO (ex: "MA")
+  //     └── EmailAddress       = Email
+  // Il n'existe PAS de champ SupplierName au niveau header PO dans cette API.
+  const supplierAddr = sapOrder._SupplierAddress || {};
   const supplier = {
-    code_sap: String(sapOrder.Supplier || sapOrder.SupplierCode || '').trim(),
-    nom: sapOrder.SupplierName || sapOrder.Supplier || 'Fournisseur inconnu',
-    pays: sapOrder.SupplierCountry || sapOrder.Country || 'MA',
-    email: sapOrder.SupplierEmail || sapOrder.EmailAddress || null,
-    telephone: sapOrder.SupplierPhone || sapOrder.PhoneNumber || null,
+    code_sap: text(sapOrder.Supplier || sapOrder.SupplierCode, ''),
+    nom: text(
+      supplierAddr.OrganizationName1    // Nom principal — confirmé par CDS
+        || supplierAddr.AddresseeFullName // Fallback : personne physique
+        || null,
+      'Fournisseur inconnu'
+    ),
+    pays: text(supplierAddr.Country, 'MA'),
+    email: text(supplierAddr.EmailAddress),
+    telephone: text(sapOrder.SupplierPhoneNumber), // Champ header PO confirmé par CDS
     actif: true,
   };
 
@@ -366,27 +444,45 @@ function mapSAPItemsToCDS(sapItems) {
 
     const qte = parseDecimal(item.OrderQuantity || item.QuantityOrdered, 'OrderQuantity');
     const prix = parseDecimal(item.NetPriceAmount || item.UnitPrice, 'NetPriceAmount');
+    const hasOpenQty = item.OpenPurchaseOrderQuantity !== undefined && item.OpenPurchaseOrderQuantity !== null && item.OpenPurchaseOrderQuantity !== '';
+    const openQty = hasOpenQty ? parseDecimal(item.OpenPurchaseOrderQuantity, 'OpenPurchaseOrderQuantity').value : null;
+    const deliveredQty = item.DeliveredQuantity !== undefined
+      ? parseDecimal(item.DeliveredQuantity, 'DeliveredQuantity').value
+      : hasOpenQty ? Math.max(qte.value - openQty, 0) : 0;
 
     if (qte.error) errors.push(qte.error);
     if (prix.error) errors.push(prix.error);
 
     lignes.push({
       ID: uuid(),
-      numero_poste: parseInt(item.PurchaseOrderItem || item.PurchaseOrderItemNumber, 10),
-      code_produit: String(item.Material || item.ProductCode || 'INCONNU').trim(),
-      designation_produit: item.PurchaseOrderItemText || item.Description || null,
+      numero_poste: parseInt(text(item.PurchaseOrderItem || item.PurchaseOrderItemNumber, '0'), 10),
+      code_produit: limitText(item.Material || item.ProductCode, 40, 'INCONNU'),
+      designation_produit: limitText(item.PurchaseOrderItemText || item.Description, 80),
       quantite_commandee: qte.value,
-      quantite_livree: parseDecimal(item.DeliveredQuantity || 0, 'DeliveredQuantity').value,
+      quantite_livree: deliveredQty,
       prix_unitaire: prix.value,
-      unite: item.OrderPriceUnit || item.Unit || 'PC',
-      poids_total: parseDecimal(item.GrossWeight || 0, 'GrossWeight').value || null,
+      unite: limitText(item.OrderPriceUnit || item.PurchaseOrderQuantityUnit || item.OrderQuantityUnit || item.Unit, 6, 'PC'),
+      poids_total: parseDecimal(item.ItemGrossWeight || item.GrossWeight || 0, 'ItemGrossWeight').value || null,
       // Champs SAP au niveau item — nouveaux
-      categorie_article: (item.ArticleCategory || item.MaterialGroup || '').trim() || null,
-      plant: (item.Plant || '').trim() || null,
+      categorie_article: limitText(item.ArticleCategory || item.MaterialGroup, 20) || null,
+      plant: limitText(item.Plant, 4) || null,
     });
   }
 
   return { lignes, errors };
+}
+
+function computeOrderAmountFromItems(sapItems) {
+  if (!Array.isArray(sapItems) || sapItems.length === 0) return 0;
+  return Math.round(sapItems.reduce((total, item) => {
+    const explicitNet = parseDecimal(item.NetAmount || item.PurchaseOrderItemNetAmount, 'ItemNetAmount').value;
+    if (explicitNet) return total + explicitNet;
+
+    const qty = parseDecimal(item.OrderQuantity || item.QuantityOrdered, 'OrderQuantity').value;
+    const price = parseDecimal(item.NetPriceAmount || item.UnitPrice, 'NetPriceAmount').value;
+    const priceQty = parseDecimal(item.NetPriceQuantity || item.PriceQuantity || 1, 'PriceQuantity', { defaultValue: 1 }).value || 1;
+    return total + ((qty * price) / priceQty);
+  }, 0) * 100) / 100;
 }
 
 // ===========================================================================
@@ -396,6 +492,54 @@ function mapSAPItemsToCDS(sapItems) {
 /** Délais de retry en ms : 1s, 2s, 4s */
 const RETRY_DELAYS = [1000, 2000, 4000];
 const MAX_RETRIES = RETRY_DELAYS.length;
+
+function getHttpStatus(err) {
+  return err?.reason?.response?.status || err?.response?.status || err?.reason?.status || err?.status || err?.statusCode;
+}
+
+function isRetryableError(err) {
+  const status = getHttpStatus(err);
+  return !status || status === 408 || status === 429 || status >= 500;
+}
+
+function toODataDateTimeOffset(value) {
+  const source = value || new Date(Date.now() - 86400000);
+  const date = source instanceof Date ? source : new Date(source);
+
+  if (Number.isNaN(date.getTime())) {
+    LOG.warn('Date DELTA invalide (%s) - fallback 24h', source);
+    return new Date(Date.now() - 86400000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  }
+
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function buildPurchaseOrderUrl({ mode, lastSyncDate, pageSize }) {
+  const baseUrl = '/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001/PurchaseOrder';
+  const query = [
+    `$expand=${encodeURIComponent('_PurchaseOrderItem,_SupplierAddress')}`,
+    `$top=${encodeURIComponent(String(pageSize))}`,
+  ];
+
+  if (mode !== 'FULL') {
+    const filterDate = toODataDateTimeOffset(lastSyncDate);
+    query.push(`$filter=${encodeURIComponent(`LastChangeDateTime gt ${filterDate}`)}`);
+  }
+
+  return `${baseUrl}?${query.join('&')}`;
+}
+
+function normalizeSapRelativeUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  if (url.startsWith('/')) return url;
+
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
 
 /**
  * Exécute une fonction async avec retry + exponential backoff.
@@ -412,6 +556,10 @@ async function _withRetry(fn, label = 'opération') {
       return await fn();
     } catch (err) {
       lastError = err;
+      if (!isRetryableError(err)) {
+        LOG.warn('Retry %s annule : erreur non transitoire (%s)', label, err.message);
+        throw err;
+      }
       if (attempt < MAX_RETRIES) {
         const delay = RETRY_DELAYS[attempt];
         LOG.warn('Retry %s — tentative %d/%d échouée (%s), retry dans %dms',
@@ -439,9 +587,10 @@ async function _withRetry(fn, label = 'opération') {
  * - WebSocket   : émet SYNC_AUTO_COMPLETE vers la room ADMIN
  *
  * @param {string} mode - 'DELTA' (dernière sync) ou 'FULL' (toutes les commandes)
+ * @param {{ jobId?: string, skipJobInsert?: boolean }} options - Réutilisation d'un job créé par la route admin.
  * @returns {{ creees: number, mises_a_jour: number, erreurs: number, details: Object[] }}
  */
-async function syncDelta(mode = 'DELTA') {
+async function syncDelta(mode = 'DELTA', options = {}) {
   const db = await cds.connect.to('db');
   const io = global._socketIO;
   let creees = 0, mises_a_jour = 0, erreurs = 0;
@@ -449,20 +598,24 @@ async function syncDelta(mode = 'DELTA') {
   const startedAt = new Date();
 
   // Créer le job de sync en BDD
-  const jobId = uuid();
-  try {
-    await dbRun(db,
-      `INSERT INTO smartorder_SyncJobs (ID, mode, statut, started_at, createdAt)
-       VALUES ($1, $2, 'EN_COURS', $3, $4)`,
-      [jobId, mode, startedAt.toISOString(), startedAt.toISOString()]
-    );
-  } catch (err) {
-    LOG.warn('Impossible d\'enregistrer le job sync : %s', err.message);
+  const jobId = options.jobId || uuid();
+  if (!options.skipJobInsert) {
+    try {
+      await db.run(
+        `INSERT INTO smartorder_SyncJobs (ID, mode, statut, started_at, createdAt)
+         VALUES (${p(1)}, ${p(2)}, 'EN_COURS', ${p(3)}, ${p(4)})`,
+        bind([jobId, mode, startedAt.toISOString(), startedAt.toISOString()])
+      );
+    } catch (err) {
+      LOG.warn('Impossible d\'enregistrer le job sync : %s', err.message);
+    }
   }
 
   LOG.info('Sync SAP démarrée — mode=%s jobId=%s', mode, jobId);
 
   try {
+    await ensurePostgresSyncSchema(db);
+
     // 1. Récupérer la date du dernier sync réussi (pour mode DELTA)
     const lastSyncDate = await _getLastSyncDate(db);
 
@@ -492,13 +645,13 @@ async function syncDelta(mode = 'DELTA') {
     // 4. Mettre à jour le job de sync → SUCCES
     const endedAt = new Date();
     try {
-      await dbRun(db,
+      await db.run(
         `UPDATE smartorder_SyncJobs
-         SET statut='SUCCES', commandes_creees=$1, commandes_maj=$2,
-             erreurs=$3, ended_at=$4, depuis=$5
-         WHERE ID=$6`,
-        [creees, mises_a_jour, erreurs, endedAt.toISOString(),
-          lastSyncDate || startedAt.toISOString(), jobId]
+         SET statut='SUCCES', commandes_creees=${p(1)}, commandes_maj=${p(2)},
+             erreurs=${p(3)}, ended_at=${p(4)}, depuis=${p(5)}, duree_ms=${p(6)}
+         WHERE ID=${p(7)}`,
+        bind([creees, mises_a_jour, erreurs, endedAt.toISOString(),
+          lastSyncDate || startedAt.toISOString(), endedAt - startedAt, jobId])
       );
     } catch (err) {
       LOG.warn('Impossible de mettre à jour le job sync : %s', err.message);
@@ -520,11 +673,11 @@ async function syncDelta(mode = 'DELTA') {
   } catch (err) {
     // Mettre à jour le job de sync → ECHEC
     try {
-      await dbRun(db,
+      await db.run(
         `UPDATE smartorder_SyncJobs
-         SET statut='ECHEC', error_message=$1, ended_at=$2, erreurs=$3
-         WHERE ID=$4`,
-        [err.message, new Date().toISOString(), erreurs + 1, jobId]
+         SET statut='ECHEC', error_message=${p(1)}, ended_at=${p(2)}, erreurs=${p(3)}
+         WHERE ID=${p(4)}`,
+        bind([err.message, new Date().toISOString(), erreurs + 1, jobId])
       );
     } catch (dbErr) {
       LOG.warn('Impossible de mettre à jour le job sync (échec) : %s', dbErr.message);
@@ -537,6 +690,26 @@ async function syncDelta(mode = 'DELTA') {
   LOG.info('Sync SAP terminée — créées=%d maj=%d erreurs=%d (jobId=%s)',
     creees, mises_a_jour, erreurs, jobId);
   return { creees, mises_a_jour, erreurs, details, jobId };
+}
+
+async function ensurePostgresSyncSchema(db) {
+  if (!isPostgres()) return;
+
+  const statements = [
+    'ALTER TABLE smartorder_LignesCommande ALTER COLUMN unite TYPE varchar(6)',
+    'ALTER TABLE smartorder_LignesCommande ALTER COLUMN categorie_article TYPE varchar(20)',
+    'ALTER TABLE smartorder_LignesCommande ALTER COLUMN designation_produit TYPE varchar(80)',
+    'ALTER TABLE smartorder_SyncJobs ADD COLUMN IF NOT EXISTS duree_ms integer',
+    'ALTER TABLE smartorder_SyncJobs ADD COLUMN IF NOT EXISTS error_message text',
+  ];
+
+  for (const statement of statements) {
+    try {
+      await db.run(statement);
+    } catch (err) {
+      LOG.debug('Migration sync ignoree (%s) : %s', statement, err.message);
+    }
+  }
 }
 
 // ===========================================================================
@@ -552,27 +725,18 @@ async function syncDelta(mode = 'DELTA') {
  * @returns {Object[]} Toutes les entités SAP récupérées
  */
 async function _fetchAllPagesFromSAP(mode, lastSyncDate) {
-  const isDev = process.env.NODE_ENV !== 'production';
-
-  if (isDev) {
-    LOG.info('Mode développement — utilisation des données simulées SAP');
-    const mock = _getMockSAPData();
-    return parseODataResponse(mock).entities;
+  // USE_MOCK_SAP=true → données simulées (BAS dev, tests, démo)
+  // USE_MOCK_SAP=false ou absent → appel réel SAP S/4HANA Cloud
+  if (process.env.USE_MOCK_SAP === 'true') {
+    LOG.info('USE_MOCK_SAP=true — utilisation des données simulées SAP');
+    return parseODataResponse(_getMockSAPData()).entities;
   }
 
-  // Construire l'URL initiale — OData v4
-  const baseUrl = '/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001/PurchaseOrder';
-  const expand = '$expand=_PurchaseOrderItem';
+  // Construire l'URL initiale — OData v4.
+  // _SupplierAddress : Composition of one confirmée par CE_PURCHASEORDER_0001.cds.
+  // URLSearchParams encode le $filter pour éviter les dates JS invalides dans l'URL SAP.
   const pageSize = mode === 'FULL' ? 500 : 100;
-
-  let url;
-  if (mode === 'FULL') {
-    url = `${baseUrl}?${expand}&$top=${pageSize}`;
-  } else {
-    // DELTA : filtrer sur LastChangeDateTime > dernier sync
-    const filterDate = lastSyncDate || new Date(Date.now() - 86400000).toISOString();
-    url = `${baseUrl}?${expand}&$top=${pageSize}&$filter=LastChangeDateTime gt ${filterDate}`;
-  }
+  let url = buildPurchaseOrderUrl({ mode, lastSyncDate, pageSize });
 
   const allEntities = [];
   let pageCount = 0;
@@ -597,7 +761,7 @@ async function _fetchAllPagesFromSAP(mode, lastSyncDate) {
     allEntities.push(...entities);
 
     // Vérifier s'il y a une page suivante
-    url = _getNextLink(response);
+    url = normalizeSapRelativeUrl(_getNextLink(response));
     if (url) {
       LOG.debug('Sync SAP — @odata.nextLink trouvé, page suivante…');
     }
@@ -617,12 +781,21 @@ async function _fetchAllPagesFromSAP(mode, lastSyncDate) {
  * Séparé pour faciliter le retry.
  */
 async function _callSAPDestination(url) {
+  const relativeUrl = normalizeSapRelativeUrl(url);
   try {
     const dest = await cds.connect.to('SAP_ERP');
-    return await dest.get(url);
+    return await dest.get(relativeUrl);
   } catch (err) {
-    LOG.error('Erreur appel SAP : %s (url=%s)', err.message, url.substring(0, 100));
-    throw new Error(`Connexion SAP échouée : ${err.message}`);
+    const status = getHttpStatus(err);
+    const message = status === 401 || status === 403
+      ? `Authentification SAP refusee (${status}). Verifie la destination SAP_ERP, ses credentials et les autorisations du communication user.`
+      : `Connexion SAP echouee : ${err.message}`;
+    LOG.error('Erreur appel SAP : %s (url=%s)', message, relativeUrl.substring(0, 160));
+    const wrapped = new Error(message);
+    wrapped.statusCode = status;
+    wrapped.correlationId = err?.reason?.correlationId || err?.correlationId;
+    wrapped.cause = err;
+    throw wrapped;
   }
 }
 
@@ -669,36 +842,67 @@ async function _processOneOrder(db, sapOrder) {
     LOG.debug('Sync %s — avertissements : %s', order.numero_sap, warnings.join('; '));
   }
 
+  const sapItems = sapOrder._PurchaseOrderItem
+    || sapOrder.to_PurchaseOrderItem?.results
+    || sapOrder.to_PurchaseOrderItem
+    || [];
+
+  if ((!order.montant_total || order.montant_total === 0) && sapItems.length > 0) {
+    order.montant_total = computeOrderAmountFromItems(sapItems);
+  }
+
   // 2. UPSERT fournisseur
   let fournisseur_ID = null;
   if (supplier.code_sap) {
-    const existing = await dbRun(db,
-      `SELECT ID FROM smartorder_Fournisseurs WHERE code_sap = $1`,
-      [supplier.code_sap]
+    const existing = await db.run(
+      `SELECT ID FROM smartorder_Fournisseurs WHERE code_sap = ${p(1)}`,
+      bind([supplier.code_sap])
     );
 
     if (existing.length > 0) {
       fournisseur_ID = existing[0].ID;
-      await dbRun(db,
-        `UPDATE smartorder_Fournisseurs SET nom=$1, pays=$2, updatedAt=$3 WHERE ID=$4`,
-        [supplier.nom, supplier.pays, new Date().toISOString(), fournisseur_ID]
+      await db.run(
+        `UPDATE smartorder_Fournisseurs
+         SET nom=${p(1)}, pays=${p(2)}, email=${p(3)}, telephone=${p(4)},
+             actif=${p(5)}, derniere_sync=${p(6)}, updatedAt=${p(7)}
+         WHERE ID=${p(8)}`,
+        bind([
+          supplier.nom,
+          normalizeCountryCode(supplier.pays),
+          supplier.email,
+          supplier.telephone,
+          true,
+          new Date().toISOString(),
+          new Date().toISOString(),
+          fournisseur_ID,
+        ])
       );
     } else {
       fournisseur_ID = uuid();
-      await dbRun(db,
-        `INSERT INTO smartorder_Fournisseurs (ID, code_sap, nom, pays, email, telephone, actif, createdAt, updatedAt)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [fournisseur_ID, supplier.code_sap, supplier.nom, supplier.pays,
-          supplier.email, supplier.telephone, true,
-          new Date().toISOString(), new Date().toISOString()]
+      await db.run(
+        `INSERT INTO smartorder_Fournisseurs
+         (ID, code_sap, nom, pays, email, telephone, actif, derniere_sync, createdAt, updatedAt)
+         VALUES (${p(1)},${p(2)},${p(3)},${p(4)},${p(5)},${p(6)},${p(7)},${p(8)},${p(9)},${p(10)})`,
+        bind([
+          fournisseur_ID,
+          supplier.code_sap,
+          supplier.nom,
+          normalizeCountryCode(supplier.pays),
+          supplier.email,
+          supplier.telephone,
+          true,
+          new Date().toISOString(),
+          new Date().toISOString(),
+          new Date().toISOString(),
+        ])
       );
     }
   }
 
   // 3. UPSERT commande
-  const existingOrder = await dbRun(db,
-    `SELECT ID FROM smartorder_Orders WHERE numero_sap = $1`,
-    [order.numero_sap]
+  const existingOrder = await db.run(
+    `SELECT ID FROM smartorder_Orders WHERE numero_sap = ${p(1)}`,
+    bind([order.numero_sap])
   );
 
   let action;
@@ -707,26 +911,26 @@ async function _processOneOrder(db, sapOrder) {
   if (existingOrder.length > 0) {
     // UPDATE
     orderId = existingOrder[0].ID;
-    await dbRun(db,
+    await db.run(
       `UPDATE smartorder_Orders
-       SET statut=$1, montant_total=$2, date_modification=$3, date_previsionnelle=$4,
-           date_livraison_reelle=$5, updatedAt=$6, fournisseur_ID=$7,
-           company_code=$8, purchasing_org=$9, purchasing_group=$10,
-           marqueur_suppression=$11, statut_approbation=$12,
-           date_commande=$13, postes_en_retard=$14
-       WHERE ID=$15`,
-      [order.statut, order.montant_total, order.date_modification,
+       SET statut=${p(1)}, montant_total=${p(2)}, date_modification=${p(3)}, date_previsionnelle=${p(4)},
+           date_livraison_reelle=${p(5)}, updatedAt=${p(6)}, fournisseur_ID=${p(7)},
+           company_code=${p(8)}, purchasing_org=${p(9)}, purchasing_group=${p(10)},
+           marqueur_suppression=${p(11)}, statut_approbation=${p(12)},
+           date_commande=${p(13)}, postes_en_retard=${p(14)}
+       WHERE ID=${p(15)}`,
+      bind([order.statut, order.montant_total, order.date_modification,
       order.date_previsionnelle, order.date_livraison_reelle,
       new Date().toISOString(), fournisseur_ID,
       order.company_code, order.purchasing_org, order.purchasing_group,
       order.marqueur_suppression, order.statut_approbation,
-      order.date_commande, order.postes_en_retard, orderId]
+      order.date_commande, order.postes_en_retard, orderId])
     );
     action = 'updated';
   } else {
     // INSERT
     orderId = uuid();
-    await dbRun(db,
+    await db.run(
       `INSERT INTO smartorder_Orders
        (ID, numero_sap, type, statut, urgence,
         date_creation, date_previsionnelle, date_livraison_reelle,
@@ -734,42 +938,43 @@ async function _processOneOrder(db, sapOrder) {
         company_code, purchasing_org, purchasing_group, marqueur_suppression,
         statut_approbation, date_commande, postes_en_retard,
         fournisseur_ID, createdAt, updatedAt)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
-      [orderId, order.numero_sap, order.type, order.statut, order.urgence,
+       VALUES (${p(1)},${p(2)},${p(3)},${p(4)},${p(5)},${p(6)},${p(7)},${p(8)},${p(9)},${p(10)},${p(11)},${p(12)},${p(13)},${p(14)},${p(15)},${p(16)},${p(17)},${p(18)},${p(19)},${p(20)},${p(21)},${p(22)})`,
+      bind([orderId, order.numero_sap, order.type, order.statut, order.urgence,
         order.date_creation, order.date_previsionnelle,
         order.date_livraison_reelle, order.date_modification, order.montant_total,
         order.devise, order.score_priorite,
         order.company_code, order.purchasing_org, order.purchasing_group,
         order.marqueur_suppression,
         order.statut_approbation, order.date_commande, order.postes_en_retard,
-        fournisseur_ID, order.createdAt, order.updatedAt]
+        fournisseur_ID, order.createdAt, order.updatedAt])
     );
     action = 'created';
   }
 
   // 4. Traiter les lignes de commande (si présentes) — OData v4
-  const sapItems = sapOrder._PurchaseOrderItem
-    || sapOrder.to_PurchaseOrderItem?.results
-    || sapOrder.to_PurchaseOrderItem
-    || [];
   if (sapItems.length > 0) {
     const { lignes } = mapSAPItemsToCDS(sapItems);
+    await db.run(
+      `DELETE FROM smartorder_LignesCommande WHERE commande_ID = ${p(1)}`,
+      bind([orderId])
+    );
     for (const ligne of lignes) {
       ligne.commande_ID = orderId;
-      // ON CONFLICT DO NOTHING n'est pas supporté par SQLite < 3.24 — on ignore les erreurs
       try {
-        await dbRun(db,
+        await db.run(
           `INSERT INTO smartorder_LignesCommande
            (ID, commande_ID, numero_poste, code_produit, designation_produit,
             quantite_commandee, quantite_livree, prix_unitaire, unite, poids_total,
             categorie_article, plant)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-          [ligne.ID, ligne.commande_ID, ligne.numero_poste, ligne.code_produit,
+           VALUES (${p(1)},${p(2)},${p(3)},${p(4)},${p(5)},${p(6)},${p(7)},${p(8)},${p(9)},${p(10)},${p(11)},${p(12)})`,
+          bind([ligne.ID, ligne.commande_ID, ligne.numero_poste, ligne.code_produit,
           ligne.designation_produit, ligne.quantite_commandee, ligne.quantite_livree,
           ligne.prix_unitaire, ligne.unite, ligne.poids_total,
-          ligne.categorie_article, ligne.plant]
+          ligne.categorie_article, ligne.plant])
         );
-      } catch (e) { /* doublon ignoré */ }
+      } catch (e) {
+        LOG.warn('Ligne SAP ignoree (commande=%s poste=%s) : %s', order.numero_sap, ligne.numero_poste, e.message);
+      }
     }
   }
 
@@ -785,10 +990,14 @@ async function _processOneOrder(db, sapOrder) {
     : 0;
 
   if (postesEnRetard > 0) {
-    await dbRun(db,
-      `UPDATE smartorder_Orders SET postes_en_retard=$1 WHERE ID=$2`,
-      [postesEnRetard, orderId]
+    await db.run(
+      `UPDATE smartorder_Orders SET postes_en_retard=${p(1)} WHERE ID=${p(2)}`,
+      bind([postesEnRetard, orderId])
     );
+  }
+
+  if (fournisseur_ID) {
+    await recalculateSupplierMetrics(db, fournisseur_ID);
   }
 
   return { numero_sap: order.numero_sap, action, warnings };
@@ -814,8 +1023,9 @@ async function _getLastSyncDate(db) {
        LIMIT 1`
     );
     if (rows.length > 0 && rows[0].ended_at) {
-      LOG.debug('Dernier sync réussi : %s', rows[0].ended_at);
-      return rows[0].ended_at;
+      const lastSync = toODataDateTimeOffset(rows[0].ended_at);
+      LOG.debug('Dernier sync réussi : %s', lastSync);
+      return lastSync;
     }
   } catch (err) {
     LOG.warn('Impossible de lire la dernière date de sync : %s', err.message);
@@ -901,8 +1111,13 @@ module.exports = {
   parseODataResponse,
   mapSAPOrderToCDS,
   mapSAPItemsToCDS,
+  computeOrderAmountFromItems,
   parseDate,
   parseDecimal,
+  ensurePostgresSyncSchema,
+  toODataDateTimeOffset,
+  buildPurchaseOrderUrl,
+  normalizeSapRelativeUrl,
   // Constantes (pour tests)
   SAP_STATUS_MAP,
   SAP_TYPE_LABELS,
