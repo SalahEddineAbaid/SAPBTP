@@ -1,8 +1,3 @@
-/**
- * SmartOrder — Profile Service
- * Service pour la gestion du profil utilisateur et des préférences
- */
-
 import type { UserProfile, UserPreferences } from '../types';
 import { fetchApi } from './apiClient';
 
@@ -14,12 +9,12 @@ export async function getProfile(headers: Record<string, string>): Promise<UserP
     headers,
     credentials: 'include',
   }, { retries: 2, timeoutMs: 30000 });
-  
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Erreur serveur' }));
     throw new Error(error.error || 'Erreur chargement profil');
   }
-  
+
   return res.json();
 }
 
@@ -39,12 +34,12 @@ export async function updateProfile(
     credentials: 'include',
     body: JSON.stringify(data),
   }, { retries: 2, timeoutMs: 30000 });
-  
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Erreur serveur' }));
     throw new Error(error.error || 'Erreur mise à jour profil');
   }
-  
+
   return res.json();
 }
 
@@ -64,12 +59,12 @@ export async function updatePreferences(
     credentials: 'include',
     body: JSON.stringify(preferences),
   }, { retries: 2, timeoutMs: 30000 });
-  
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Erreur serveur' }));
     throw new Error(error.error || 'Erreur mise à jour préférences');
   }
-  
+
   return res.json();
 }
 

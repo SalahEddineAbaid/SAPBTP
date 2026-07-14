@@ -29,9 +29,9 @@ function getIdentityFromPayload(payload = {}) {
   const email = cleanText(payload.email || payload.mail);
   const username = cleanText(
     payload.user_name
-      || payload.preferred_username
-      || email
-      || payload.sub
+    || payload.preferred_username
+    || email
+    || payload.sub
   );
   const fullName = cleanText(payload.name);
   const givenName = cleanText(payload.given_name);

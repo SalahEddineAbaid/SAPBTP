@@ -128,8 +128,8 @@ export default function Header() {
           <div className="relative" ref={notificationsRef}>
             <button
               className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-600/20 active:scale-95 dark:focus:ring-cyan-400/20 ${notificationsOpen
-                  ? 'bg-blue-50 text-[#1554d1] ring-1 ring-blue-200 dark:bg-cyan-400/10 dark:text-cyan-300 dark:ring-cyan-400/20'
-                  : 'text-[#456b90] hover:bg-slate-50 hover:text-[#1554d1] dark:text-slate-400 dark:hover:bg-[#111a3a] dark:hover:text-cyan-300'
+                ? 'bg-blue-50 text-[#1554d1] ring-1 ring-blue-200 dark:bg-cyan-400/10 dark:text-cyan-300 dark:ring-cyan-400/20'
+                : 'text-[#456b90] hover:bg-slate-50 hover:text-[#1554d1] dark:text-slate-400 dark:hover:bg-[#111a3a] dark:hover:text-cyan-300'
                 }`}
               title="Notifications"
               aria-label="Notifications"

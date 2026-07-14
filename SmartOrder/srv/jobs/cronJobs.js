@@ -1,20 +1,4 @@
 'use strict';
-/**
- * SmartOrder — Orchestrateur de jobs planifiés
- *
- * Stratégie dual-mode selon USE_MOCK_SAP :
- *
- *   USE_MOCK_SAP=true  (BAS Dev Space)
- *     → node-cron (in-process) pour simuler les déclenchements
- *     → Sync SAP désactivée (pas d'appel réel)
- *     → Alertes toutes les 5 min via cron local
- *
- *   USE_MOCK_SAP=false (BTP Production)
- *     → node-cron désactivé (multi-instance → syncs concurrentes)
- *     → SAP Job Scheduling Service gère le planning
- *     → Ce module enregistre les jobs au démarrage via jobSchedulerClient
- *     → Les endpoints /api/jobs/* reçoivent les callbacks du Job Scheduler
- */
 
 const cds = require('@sap/cds');
 const LOG = cds.log('jobs');

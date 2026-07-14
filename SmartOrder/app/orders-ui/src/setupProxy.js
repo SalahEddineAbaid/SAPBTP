@@ -1,16 +1,6 @@
-/**
- * CRA Proxy Configuration
- * Sur BAS, le proxy simple (package.json "proxy") peut ne pas transmettre
- * correctement le header Authorization. Ce fichier force le passage de tous les headers.
- *
- * Configuration :
- *   REACT_APP_PROXY_TARGET  — override de la cible du proxy
- *     (ex: http://localhost:5000 pour passer par l'AppRouter)
- *     Valeur par défaut : http://localhost:4004 (backend direct)
- */
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
-module.exports = function(app) {
+module.exports = function (app) {
   const proxyTarget = process.env.REACT_APP_PROXY_TARGET || 'http://localhost:4004';
 
   const proxyConfig = {

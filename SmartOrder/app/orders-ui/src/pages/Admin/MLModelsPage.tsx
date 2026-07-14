@@ -315,7 +315,7 @@ export default function MLModelsPage() {
             </div>
           </div>
           <div className="h-72 min-h-[288px] w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={240} minHeight={288}>
               <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.1)" />
                 <XAxis 

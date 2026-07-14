@@ -143,10 +143,10 @@ router.patch('/:id', async (req, res, next) => {
     const params = [];
     let idx = 1;
 
-    if (prenom !== undefined) { updates.push(pg ? `prenom = $${idx++}` : 'prenom = ?');  params.push(prenom); }
-    if (nom   !== undefined) { updates.push(pg ? `nom = $${idx++}`   : 'nom = ?');      params.push(nom); }
-    if (email !== undefined) { updates.push(pg ? `email = $${idx++}` : 'email = ?');    params.push(email); }
-    if (actif !== undefined) { updates.push(pg ? `actif = $${idx++}` : 'actif = ?');    params.push(actif ? (pg ? true : 1) : (pg ? false : 0)); }
+    if (prenom !== undefined) { updates.push(pg ? `prenom = $${idx++}` : 'prenom = ?'); params.push(prenom); }
+    if (nom !== undefined) { updates.push(pg ? `nom = $${idx++}` : 'nom = ?'); params.push(nom); }
+    if (email !== undefined) { updates.push(pg ? `email = $${idx++}` : 'email = ?'); params.push(email); }
+    if (actif !== undefined) { updates.push(pg ? `actif = $${idx++}` : 'actif = ?'); params.push(actif ? (pg ? true : 1) : (pg ? false : 0)); }
 
     updates.push(pg ? `updatedAt = $${idx++}` : 'updatedAt = ?');
     params.push(new Date().toISOString());
@@ -158,7 +158,7 @@ router.patch('/:id', async (req, res, next) => {
     );
     const updated = await db.run(
       pg ? `SELECT * FROM smartorder_Utilisateurs WHERE ID = $1`
-         : `SELECT * FROM smartorder_Utilisateurs WHERE ID = ?`,
+        : `SELECT * FROM smartorder_Utilisateurs WHERE ID = ?`,
       [id]
     );
     if (!updated[0]) return res.status(404).json({ error: 'Utilisateur introuvable.' });
@@ -175,7 +175,7 @@ router.delete('/:id', async (req, res, next) => {
 
     const existing = await db.run(
       pg ? `SELECT ID, username, xsuaa_user_id FROM smartorder_Utilisateurs WHERE ID = $1`
-         : `SELECT ID, username, xsuaa_user_id FROM smartorder_Utilisateurs WHERE ID = ?`,
+        : `SELECT ID, username, xsuaa_user_id FROM smartorder_Utilisateurs WHERE ID = ?`,
       [id]
     );
 
@@ -234,7 +234,7 @@ router.patch('/:id/role', async (req, res, next) => {
     LOG.info('Rôle modifié : user=%s → %s par %s', id, role, currentUserId);
     const updated = await db.run(
       pg ? `SELECT * FROM smartorder_Utilisateurs WHERE ID = $1`
-         : `SELECT * FROM smartorder_Utilisateurs WHERE ID = ?`,
+        : `SELECT * FROM smartorder_Utilisateurs WHERE ID = ?`,
       [id]
     );
     if (!updated[0]) return res.status(404).json({ error: 'Utilisateur introuvable.' });

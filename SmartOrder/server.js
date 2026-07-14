@@ -1,20 +1,8 @@
 'use strict';
 const path = require('path');
 require('dotenv').config();
-const { Pool: PgPool } = require('pg');
-/**
- * SmartOrder — Extension du serveur CAP
- * Projet PFE SAP BTP — YAAS "Run It Best"
- *
- * Ce fichier étend le serveur Express CAP avec :
- * 1. /api/me — Endpoint info utilisateur (pour AuthService Angular)
- * 2. Role middleware — Contrôle d'accès RBAC avec héritage ADMIN→MANAGER→USER
- * 3. Socket.io (WebSocket rooms par rôle)
- * 4. Routes custom REST (analytics, export CSV, admin, sync SAP, ML)
- * 5. Cron jobs (sync 15min + alertes 5min)
- *
- * Utilisé par CAP via package.json : "cds": { "server": "./server.js" }
- */
+// NOTE: PgPool import removed — all database access now goes through the CDS pool
+// to eliminate the double-pool antipattern that was exhausting Neon connections.
 
 const cds = require('@sap/cds');
 const LOG = cds.log('server');
@@ -41,9 +29,6 @@ const {
 let postgresReady = false;
 let postgresSchemaReady = false;
 let postgresSchemaError = null;
-let postgresRecoveryTimer = null;
-let directPgPool = null;
-let directPgPoolSignature = '';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,99 +62,36 @@ function isTransientPostgresDisconnect(err) {
   const code = String(err?.code || '').toUpperCase();
 
   return [
-    '57P01',
-    '57P02',
-    '57P03',
-    '53300',
-    '08006',
-    '08001',
-    '08003',
-    'ECONNRESET',
-    'ECONNREFUSED',
-    'ECONNABORTED',
-    'ETIMEDOUT',
-    'ENOTFOUND',
-    'ENETUNREACH',
-    'EPIPE',
+    '57P01', '57P02', '57P03', '53300',
+    '08006', '08001', '08003',
+    'ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED',
+    'ETIMEDOUT', 'ENOTFOUND', 'ENETUNREACH', 'EPIPE',
     'SMARTORDER_READ_TIMEOUT',
   ].includes(code) || [
     'terminating connection due to administrator command',
-    'terminating connection due to idle-session timeout',
-    'connection terminated unexpectedly',
-    'connection terminated',
-    'client has encountered a connection error',
-    'connection timeout',
-    'resource request timed out',
-    'request timed out',
-    'timeout exceeded',
-    'upstream connect error',
-    'reset reason: connection termination',
-    'socket hang up',
-    'read econnreset',
+    'connection terminated unexpectedly', 'connection terminated',
+    'connection timeout', 'timeout exceeded', 'socket hang up',
   ].some((pattern) => message.includes(pattern));
 }
+
+let postgresRecoveryScheduled = false;
 
 function markPostgresUnhealthy(err) {
   postgresReady = false;
   postgresSchemaReady = false;
   postgresSchemaError = err?.message || String(err || 'PostgreSQL connection lost');
-}
 
-function schedulePostgresRecovery(reason) {
-  if (cds.env.requires?.db?.kind !== 'postgres') return;
-  if (postgresRecoveryTimer) return;
-
-  postgresRecoveryTimer = setTimeout(async () => {
-    postgresRecoveryTimer = null;
-    try {
-      await disposeDirectPostgresPool();
-      const db = cds.db || cds.services?.db;
-      if (db && typeof db.disconnect === 'function') {
-        await db.disconnect();
-      }
-    } catch (err) {
-      LOG.warn(`PostgreSQL recovery disconnect ignoree : ${err.message}`);
-    }
-
-    try {
-      LOG.warn(`PostgreSQL recovery demarree apres deconnexion transitoire : ${reason}`);
-      await warmupDatabase({ attempts: 5, delayMs: 3000 });
-    } catch (err) {
-      markPostgresUnhealthy(err);
-      LOG.warn(`PostgreSQL recovery echouee : ${err.message}`);
-    }
-  }, 2000);
-
-  if (typeof postgresRecoveryTimer.unref === 'function') postgresRecoveryTimer.unref();
-}
-
-function installPostgresDisconnectGuards() {
-  if (global.__smartorderPgDisconnectGuardsInstalled) return;
-  global.__smartorderPgDisconnectGuardsInstalled = true;
-
-  process.on('uncaughtException', (err) => {
-    if (isTransientPostgresDisconnect(err)) {
-      markPostgresUnhealthy(err);
-      LOG.warn(`PostgreSQL deconnexion transitoire interceptee (process continue) : ${err.message}`);
-      schedulePostgresRecovery(err.message);
-      return;
-    }
-
-    LOG.error(`Exception non geree fatale : ${err?.stack || err?.message || err}`);
-    process.exitCode = 1;
-    setImmediate(() => process.exit(1));
-  });
-
-  process.on('unhandledRejection', (reason) => {
-    if (isTransientPostgresDisconnect(reason)) {
-      markPostgresUnhealthy(reason);
-      LOG.warn(`PostgreSQL rejet transitoire intercepte (process continue) : ${reason?.message || reason}`);
-      schedulePostgresRecovery(reason?.message || String(reason));
-      return;
-    }
-
-    LOG.error(`Promise rejetee non geree : ${reason?.stack || reason?.message || reason}`);
-  });
+  // Auto-recovery : relancer le warm-up après 5s si pas déjà planifié.
+  // Remplace schedulePostgresRecovery() supprimé lors de la migration CDS pool.
+  if (!postgresRecoveryScheduled) {
+    postgresRecoveryScheduled = true;
+    setTimeout(async () => {
+      postgresRecoveryScheduled = false;
+      try {
+        await warmupDatabase({ attempts: 3, delayMs: 2000 });
+      } catch { /* warmupDatabase loggue ses propres erreurs */ }
+    }, 5000).unref?.();
+  }
 }
 
 function configurePostgresRuntime() {
@@ -231,15 +153,17 @@ async function warmupDatabase({ attempts = 10, delayMs = 3000 } = {}) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       const startedAt = Date.now();
+      // Use CDS pool — no more direct PgPool
       const db = await cds.connect.to('db');
-      const schemaCheck = await db.run(`
+      const rows = await db.run(`
         SELECT
           1 AS ok,
           to_regclass('smartorder_orders') AS orders_table,
           to_regclass('smartorder_utilisateurs') AS users_table,
           to_regclass('ordersservice_orders') AS orders_service_relation
       `);
-      const schema = schemaCheck?.[0] || {};
+
+      const schema = rows?.[0] || {};
       postgresReady = true;
       postgresSchemaReady = Boolean(schema.orders_table && schema.users_table && schema.orders_service_relation);
       postgresSchemaError = postgresSchemaReady
@@ -260,6 +184,50 @@ async function warmupDatabase({ attempts = 10, delayMs = 3000 } = {}) {
 
   LOG.warn('PostgreSQL warm-up non concluant. Le serveur continue, mais les premieres requetes peuvent expirer.');
 }
+
+// ---------------------------------------------------------------------------
+// queryViaCds — Single pool database query using the CDS connection
+// Replaces the former queryPostgresOneShot which maintained a separate PgPool.
+// All queries now share the CAP-managed connection pool, eliminating the
+// double-pool antipattern that was exhausting Neon's connection limit.
+// ---------------------------------------------------------------------------
+async function queryViaCds(sql, params = [], options = {}) {
+  const timeoutMs = Number(options.timeoutMs || getReadTimeoutMs());
+  let timer;
+
+  try {
+    const db = await cds.connect.to('db');
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error(`CDS query timed out after ${timeoutMs}ms`);
+        err.code = 'SMARTORDER_READ_TIMEOUT';
+        err.statusCode = 503;
+        reject(err);
+      }, timeoutMs);
+      if (typeof timer.unref === 'function') timer.unref();
+    });
+
+    const result = await Promise.race([db.run(sql, params), timeout]);
+    postgresReady = true;
+    // CDS db.run returns rows directly (array), not { rows }
+    return Array.isArray(result) ? result : (result?.rows || [result] || []);
+  } catch (err) {
+    if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
+      markPostgresUnhealthy(err);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Alias for backward compatibility — all callers of queryPostgresOneShot
+// now go through the CDS pool instead of a separate PgPool.
+const queryPostgresOneShot = queryViaCds;
+
+// ---------------------------------------------------------------------------
+// Helper functions used by inline Express routes
+// ---------------------------------------------------------------------------
 
 function isPostgresPending() {
   return cds.env.requires?.db?.kind === 'postgres' && (!postgresReady || !postgresSchemaReady);
@@ -292,138 +260,6 @@ function shouldTryPostgresRead() {
 
 function sqlParam(index) {
   return cds.env.requires?.db?.kind === 'postgres' ? `$${index}` : '?';
-}
-
-function getPostgresClientConfig() {
-  const credentials = cds.env.requires?.db?.credentials || {};
-  const clientConfig = cds.env.requires?.db?.client || {};
-  const ssl = credentials.ssl
-    || clientConfig.ssl
-    || (credentials.sslmode === 'require' ? { rejectUnauthorized: false } : undefined);
-
-  return {
-    host: credentials.host,
-    port: Number(credentials.port || 5432),
-    database: credentials.database || credentials.dbname,
-    user: credentials.user || credentials.username,
-    password: credentials.password,
-    ssl,
-    connectionTimeoutMillis: Number(
-      process.env.SMARTORDER_PG_CONNECT_TIMEOUT_MS
-      || clientConfig.connectionTimeoutMillis
-      || 15000
-    ),
-    statement_timeout: Number(
-      process.env.SMARTORDER_PG_STATEMENT_TIMEOUT_MS
-      || clientConfig.statement_timeout
-      || 60000
-    ),
-    query_timeout: Number(
-      process.env.SMARTORDER_PG_QUERY_TIMEOUT_MS
-      || clientConfig.query_timeout
-      || 45000
-    ),
-    keepAlive: true,
-    keepAliveInitialDelayMillis: 10000,
-    application_name: 'smartorder-direct-read',
-  };
-}
-
-function getPoolNumberEnv(name, fallback, min, max) {
-  const value = Number(process.env[name] || fallback);
-  const normalized = Number.isFinite(value) ? value : fallback;
-  return Math.min(Math.max(normalized, min), max);
-}
-
-function buildDirectPgPoolConfig() {
-  const base = getPostgresClientConfig();
-  return {
-    ...base,
-    max: getPoolNumberEnv('SMARTORDER_PG_POOL_MAX', 2, 1, 5),
-    min: 0,
-    idleTimeoutMillis: getPoolNumberEnv('SMARTORDER_PG_IDLE_TIMEOUT_MS', 15000, 5000, 60000),
-    connectionTimeoutMillis: getPoolNumberEnv(
-      'SMARTORDER_PG_CONNECT_TIMEOUT_MS',
-      base.connectionTimeoutMillis || 15000,
-      5000,
-      60000
-    ),
-    allowExitOnIdle: true,
-  };
-}
-
-function getDirectPostgresPool() {
-  const config = buildDirectPgPoolConfig();
-  const signature = JSON.stringify({
-    host: config.host,
-    port: config.port,
-    database: config.database,
-    user: config.user,
-    ssl: Boolean(config.ssl),
-    max: config.max,
-  });
-
-  if (!directPgPool || directPgPoolSignature !== signature) {
-    if (directPgPool) {
-      directPgPool.end().catch((err) => {
-        LOG.warn(`PostgreSQL pool direct ancien fermeture ignoree : ${err.message}`);
-      });
-    }
-
-    directPgPool = new PgPool(config);
-    directPgPoolSignature = signature;
-    directPgPool.on('error', (err) => {
-      LOG.warn(`PostgreSQL pool direct erreur idle : ${err.message}`);
-      if (isTransientPostgresDisconnect(err)) {
-        markPostgresUnhealthy(err);
-        schedulePostgresRecovery(err.message);
-      }
-    });
-  }
-
-  return directPgPool;
-}
-
-async function disposeDirectPostgresPool() {
-  const pool = directPgPool;
-  directPgPool = null;
-  directPgPoolSignature = '';
-  if (pool) {
-    await pool.end().catch((err) => {
-      LOG.warn(`PostgreSQL pool direct fermeture ignoree : ${err.message}`);
-    });
-  }
-}
-
-async function queryPostgresOneShot(sql, params = [], options = {}) {
-  const pool = getDirectPostgresPool();
-  const timeoutMs = Number(options.timeoutMs || getReadTimeoutMs());
-  let timer;
-
-  try {
-    const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => {
-        const err = new Error(`PostgreSQL query timed out after ${timeoutMs}ms`);
-        err.code = 'SMARTORDER_READ_TIMEOUT';
-        err.statusCode = 503;
-        reject(err);
-      }, timeoutMs);
-      if (typeof timer.unref === 'function') timer.unref();
-    });
-
-    const result = await Promise.race([pool.query(sql, params), timeout]);
-    postgresReady = true;
-    return result.rows || [];
-  } catch (err) {
-    if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
-      markPostgresUnhealthy(err);
-      await disposeDirectPostgresPool();
-      schedulePostgresRecovery(err?.message || String(err));
-    }
-    throw err;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 function parseODataTopSkip(query, defaults = {}) {
@@ -886,13 +722,28 @@ async function readUsersDirectFromPostgres(query) {
 }
 
 configurePostgresRuntime();
-installPostgresDisconnectGuards();
+// NOTE: installPostgresDisconnectGuards() removed — CDS pool handles reconnection natively
 
-// Force mocked auth quand USE_MOCK_AUTH=true (contourne le binding CF XSUAA)
-if (process.env.USE_MOCK_AUTH === 'true' && cds.env?.requires?.auth) {
-  cds.env.requires.auth.kind = 'mocked';
-  LOG.info('Auth kind forcé à "mocked" (USE_MOCK_AUTH=true)');
+// Force auth.kind = 'mocked' in hybrid development mode.
+// This is necessary because `cds bind` stores XSUAA bindings in ~/.cds-services.json
+// and those bindings override the [hybrid] profile config at runtime.
+// Without this override, the server uses xsuaa auth even when the profile says mocked.
+//
+// Auth mode resolution:
+//   1. USE_MOCK_AUTH=true           → mocked (legacy env var, still supported)
+//   2. CDS profile = hybrid        → mocked (daily development)
+//   3. CDS profile = hybrid-xsuaa  → xsuaa  (integration testing)
+//   4. production (CF)             → xsuaa  (via VCAP_SERVICES)
+if (cds.env?.requires?.auth) {
+  const activeProfiles = cds.env.profiles || [];
+  const isHybridMocked = activeProfiles.includes('hybrid') && !activeProfiles.includes('hybrid-xsuaa');
+
+  if (process.env.USE_MOCK_AUTH === 'true' || isHybridMocked) {
+    cds.env.requires.auth.kind = 'mocked';
+    LOG.info(`Auth kind forcé à "mocked" (profile=${activeProfiles.join(',') || 'default'}, USE_MOCK_AUTH=${process.env.USE_MOCK_AUTH || 'unset'})`);
+  }
 }
+
 
 // ---------------------------------------------------------------------------
 // Middleware : Héritage de rôles  ADMIN → MANAGER → USER
@@ -1081,8 +932,11 @@ function getUserRole(req) {
   return null;
 }
 
+
 function resolveMockUserFromBasicAuth(req) {
-  if (req.user?.id || process.env.USE_MOCK_AUTH !== 'true') return;
+  // Active en mode mocked (hybrid dev) OU si USE_MOCK_AUTH est forcé (legacy)
+  const isMockedMode = (cds.env.requires?.auth?.kind === 'mocked') || (process.env.USE_MOCK_AUTH === 'true');
+  if (req.user?.id || !isMockedMode) return;
 
   const header = req.headers.authorization || '';
   if (!header.toLowerCase().startsWith('basic ')) return;
@@ -1117,7 +971,9 @@ function resolveMockUserFromBasicAuth(req) {
 }
 
 function resolveXsuaaUserFromBearerToken(req) {
-  if (process.env.USE_MOCK_AUTH === 'true') return;
+  // Ne pas traiter les tokens Bearer en mode mocked — ils viennent d'un ancien login XSUAA
+  const isMockedMode = (cds.env.requires?.auth?.kind === 'mocked') || (process.env.USE_MOCK_AUTH === 'true');
+  if (isMockedMode) return;
 
   const header = req.headers.authorization
     || req.headers['x-approuter-authorization']
@@ -1190,7 +1046,7 @@ function requireRole(...requiredRoles) {
           attr: { username: 'dev-user', email: 'dev@yaas.ma' },
           roles: ['ADMIN', 'MANAGER', 'USER'],
           scopes: ['ADMIN', 'MANAGER', 'USER', 'orders.read', 'orders.write', 'analytics.read', 'dashboard.read',
-                   'admin.users', 'admin.roles', 'admin.logs', 'admin.sync', 'admin.ml'],
+            'admin.users', 'admin.roles', 'admin.logs', 'admin.sync', 'admin.ml'],
           is: () => true,
         };
         req.userRole = 'ADMIN';
@@ -1281,7 +1137,7 @@ function requireAuthenticated(req, res, next) {
         attr: { username: 'dev-user', email: 'dev@yaas.ma' },
         roles: ['ADMIN', 'MANAGER', 'USER'],
         scopes: ['ADMIN', 'MANAGER', 'USER', 'orders.read', 'orders.write', 'analytics.read', 'dashboard.read',
-                 'admin.users', 'admin.roles', 'admin.logs', 'admin.sync', 'admin.ml'],
+          'admin.users', 'admin.roles', 'admin.logs', 'admin.sync', 'admin.ml'],
         is: () => true,
       };
       req.userRole = 'ADMIN';
@@ -1310,7 +1166,9 @@ function requireAuthenticated(req, res, next) {
 // ---------------------------------------------------------------------------
 module.exports = async (options) => {
   if (!process.env.VCAP_APPLICATION) {
-    options.host = process.env.HOST || '127.0.0.1';
+    // Utiliser 0.0.0.0 par défaut pour être joignable via 127.0.0.1 et ::1 (IPv6)
+    // indispensable pour le fonctionnement avec AppRouter et proxy CRA en BAS.
+    options.host = process.env.HOST || '0.0.0.0';
   }
   configurePostgresRuntime();
 
@@ -1327,13 +1185,12 @@ module.exports = async (options) => {
         .filter(Boolean);
       const isBasOrigin = typeof origin === 'string'
         && /^https:\/\/port\d+-[^/]+\.applicationstudio\.cloud\.sap$/i.test(origin);
-      const isLocalOrigin = typeof origin === 'string'
-        && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
-      if (origin && !isBasOrigin && !isLocalOrigin) {
+      const isLocalDev = false; // Désactivé - tout doit passer par l'approuter
+      if (origin && !isBasOrigin && !isLocalDev) {
         LOG.debug(`CORS no-match origin=${origin} path=${req.path} method=${req.method}`);
       }
 
-      if (origin && (isBasOrigin || isLocalOrigin || configuredOrigins.includes(origin))) {
+      if (origin && (isBasOrigin || configuredOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
         res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -1361,6 +1218,47 @@ module.exports = async (options) => {
 
     // Parse JSON body
     app.use(require('express').json());
+
+    // -----------------------------------------------------------------------
+    // Garantir que l'utilisateur "dev-user" est présent dans la config auth
+    // mockée de CAP, même hors profil [development] (ex: NODE_ENV=production
+    // + --profile hybrid). Cet utilisateur est utilisé pour injecter un
+    // header Authorization: Basic sur les routes OData v4 lorsque le CSV
+    // fallback est actif, ce qui permet au basic-auth CAP de valider les
+    // identifiants via Passport (req.login / req.isAuthenticated) et de
+    // positionner correctement le CDS req.user.id = "dev-user" pour les
+    // handlers CAP (profil, rôles, etc.).
+    // -----------------------------------------------------------------------
+    if (cds.env?.requires?.auth?.users && !cds.env.requires.auth.users['dev-user']) {
+      cds.env.requires.auth.users['dev-user'] = {
+        password: 'dev-pass',
+        roles: ['ADMIN', 'MANAGER', 'USER', 'authenticated-user',
+          'orders.read', 'orders.write', 'analytics.read',
+          'dashboard.read', 'predictions.view', 'export.csv',
+          'admin.users', 'admin.roles', 'admin.logs', 'admin.sync', 'admin.ml'],
+        attributes: { username: 'dev-user', email: 'dev@yaas.ma' },
+      };
+      LOG.info('Utilisateur "dev-user" ajouté à la config auth CAP');
+    }
+
+    // -----------------------------------------------------------------------
+    // Middleware d'authentification pour TOUTES les routes OData v4.
+    // Exécute requireAuthenticated (résout le user depuis Bearer/JWT ou via
+    // le fallback CSV dev-user), puis injecte un header Authorization: Basic
+    // pour que le basic-auth de CAP (kind=mocked) valide les identifiants et
+    // finalise l'authentification Passport (req.login / req.isAuthenticated).
+    // Sans cela, les routes OData CAP sur des entités spécifiques
+    // (ex: /odata/v4/orders/Orders(id)) retournent 401 car le basic-auth CAP
+    // ne trouve ni header Basic ni req.isAuthenticated() à true.
+    // -----------------------------------------------------------------------
+    app.use('/odata/v4/', (req, res, next) => {
+      requireAuthenticated(req, res, () => {
+        if (cds.env?.requires?.auth?.kind === 'mocked' && csvFallbackEnabled() && req.user?.id && !req.headers.authorization) {
+          req.headers.authorization = 'Basic ' + Buffer.from('dev-user:dev-pass').toString('base64');
+        }
+        next();
+      });
+    });
 
     // -----------------------------------------------------------------------
     // Routes publiques (AVANT l'authentification CAP)
@@ -1442,8 +1340,10 @@ module.exports = async (options) => {
         }
       } catch (err) {
         LOG.error(`Erreur /api/orders/list PostgreSQL : code=${err?.code || '-'} message=${err?.message || err}`);
-        markPostgresUnhealthy(err);
-        schedulePostgresRecovery(err?.message || String(err));
+        if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
+          markPostgresUnhealthy(err);
+        }
+        LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
         return sendCsvOrders(err?.message || 'postgres-error');
       }
 
@@ -1493,8 +1393,10 @@ module.exports = async (options) => {
         LOG.error(`Erreur READ Orders direct PostgreSQL : code=${err?.code || '-'} status=${err?.statusCode || err?.status || '-'} message=${err?.message || err}`);
 
         if (csvFallbackEnabled()) {
-          markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
+          if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
+            markPostgresUnhealthy(err);
+          }
+          LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
           return sendCsvOrders(err?.code || err?.message || 'postgres-error');
         }
 
@@ -1538,8 +1440,10 @@ module.exports = async (options) => {
       } catch (err) {
         LOG.error(`Erreur /api/suppliers PostgreSQL : code=${err?.code || '-'} message=${err?.message || err}`);
         if (csvFallbackEnabled()) {
-          markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
+          if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
+            markPostgresUnhealthy(err);
+          }
+          LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
           return sendCsvSuppliers(err?.message || 'postgres-error');
         }
         return res.status(503).json({ error: 'Erreur chargement fournisseurs' });
@@ -1549,7 +1453,19 @@ module.exports = async (options) => {
     app.get('/api/profile', requireAuthenticated, async (req, res) => {
       const sendFallbackProfile = (reason) => {
         const profile = buildProfileFallback(req);
-        if (!profile) return res.status(404).json({ error: 'Utilisateur introuvable' });
+        if (!profile) {
+          const identity = getIdentityFromUser(req.user);
+          return res.json({
+            id: req.user?.id || identity.email || identity.username || 'dev-user',
+            username: identity.username || req.user?.id || 'dev-user',
+            email: identity.email || `${req.user?.id || 'dev-user'}@yaas.ma`,
+            role: req.userRole || 'USER',
+            prenom: identity.given_name || '',
+            nom: identity.family_name || '',
+            displayName: identity.displayName || identity.name || req.user?.id || 'dev-user',
+            identitySource: 'auth-fallback-minimal',
+          });
+        }
 
         res.set('x-smartorder-data-source', 'csv-fallback');
         if (reason) res.set('x-smartorder-fallback-reason', String(reason).slice(0, 180));
@@ -1571,8 +1487,11 @@ module.exports = async (options) => {
       } catch (err) {
         LOG.error(`Erreur /api/profile PostgreSQL : code=${err?.code || '-'} message=${err?.message || err}`);
         if (csvFallbackEnabled()) {
-          markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
+          // N'invalider le pool que pour des erreurs de connexion réelles
+          if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
+            markPostgresUnhealthy(err);
+          }
+          LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
           return sendFallbackProfile(err?.message || 'postgres-error');
         }
         return res.status(503).json({ error: 'Erreur chargement profil' });
@@ -1587,45 +1506,7 @@ module.exports = async (options) => {
       });
     });
 
-    app.get('/api/admin/users', requireRole('ADMIN'), async (req, res) => {
-      const top = Math.min(Math.max(Number(req.query.top || 200), 1), 500);
-      const skip = Math.max(Number(req.query.skip || 0), 0);
-      const sendFallbackUsers = (reason) => {
-        try {
-          const result = readUsersFallback({ top, skip });
-          res.set('x-smartorder-data-source', 'csv-fallback');
-          if (reason) res.set('x-smartorder-fallback-reason', String(reason).slice(0, 180));
-          return res.json(result);
-        } catch (fallbackErr) {
-          LOG.error(`Erreur /api/admin/users fallback CSV : ${fallbackErr?.message || fallbackErr}`);
-          return res.status(500).json({
-            error: 'Utilisateurs indisponibles',
-            message: 'Fallback CSV indisponible. Verifiez db/data/smartorder-Utilisateurs.csv.',
-          });
-        }
-      };
-
-      if (!shouldTryPostgresRead()) {
-        return sendFallbackUsers(postgresSchemaError || 'postgres-pending');
-      }
-
-      try {
-        const result = await withReadTimeout(
-          readUsersDirectFromPostgres({ ...req.query, top, skip }),
-          '/api/admin/users PostgreSQL read'
-        );
-        res.set('x-smartorder-data-source', 'postgres-direct');
-        return res.json(result);
-      } catch (err) {
-        LOG.error(`Erreur /api/admin/users PostgreSQL : code=${err?.code || '-'} message=${err?.message || err}`);
-        if (csvFallbackEnabled()) {
-          markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
-          return sendFallbackUsers(err?.message || 'postgres-error');
-        }
-        return res.status(503).json({ error: 'Erreur chargement utilisateurs' });
-      }
-    });
+    // Route /api/admin/users supprimée — gérée par srv/routes/admin/users.js
 
     app.get('/api/alerts', requireRole('MANAGER'), async (req, res) => {
       const top = Math.min(Math.max(Number(req.query.top || req.query.$top || 20), 1), 100);
@@ -1664,8 +1545,10 @@ module.exports = async (options) => {
       } catch (err) {
         LOG.error(`Erreur /api/alerts PostgreSQL : code=${err?.code || '-'} message=${err?.message || err}`);
         if (csvFallbackEnabled()) {
-          markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
+          if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
+            markPostgresUnhealthy(err);
+          }
+          LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
           return sendCsvAlerts(err?.message || 'postgres-error');
         }
         return res.status(503).json({ error: 'Erreur chargement alertes' });
@@ -1695,7 +1578,7 @@ module.exports = async (options) => {
         LOG.error(`Erreur /api/alerts/${req.params.id}/ack PostgreSQL : code=${err?.code || '-'} message=${err?.message || err}`);
         if (isRecoverableDbError(err)) {
           markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
+          LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
         }
         return res.status(503).json({ error: 'Erreur acquittement alerte' });
       }
@@ -1728,8 +1611,10 @@ module.exports = async (options) => {
       } catch (err) {
         LOG.error(`Erreur fallback Alertes : ${err.message}`);
         if (csvFallbackEnabled()) {
-          markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
+          if (err?.code === 'SMARTORDER_READ_TIMEOUT' || isTransientPostgresDisconnect(err) || isRecoverableDbError(err)) {
+            markPostgresUnhealthy(err);
+          }
+          LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
           const top = Math.min(Math.max(Number(req.query.$top || 20), 1), 100);
           res.set('x-smartorder-data-source', 'csv-fallback');
           return res.json(readAlertsFallback({ top }));
@@ -1764,7 +1649,7 @@ module.exports = async (options) => {
         LOG.error(`Erreur acquittement fallback Alertes : ${err.message}`);
         if (isRecoverableDbError(err)) {
           markPostgresUnhealthy(err);
-          schedulePostgresRecovery(err?.message || String(err));
+          LOG.warn('PostgreSQL recovery will be handled by CDS pool reconnection');
         }
         res.status(503).json({ error: 'Erreur acquittement alerte' });
       }
@@ -1906,10 +1791,13 @@ module.exports = async (options) => {
 
   // -----------------------------------------------------------------------
   // 1. POST /api/login — Authentification
-  //    USE_MOCK_AUTH=true  → Mock auth (dev local sans XSUAA)
-  //    USE_MOCK_AUTH=false → XSUAA réel via password grant (ROPC)
+  //    auth.kind=mocked → Mock auth (dev local sans XSUAA, Basic auth)
+  //    auth.kind=xsuaa  → XSUAA réel via password grant (ROPC)
   // -----------------------------------------------------------------------
-  if (process.env.USE_MOCK_AUTH === 'true') {
+  const authKind = cds.env.requires?.auth?.kind || 'mocked';
+  const useMockLogin = authKind === 'mocked' || process.env.USE_MOCK_AUTH === 'true';
+
+  if (useMockLogin) {
     app.post('/api/login', (req, res) => {
       const { username, password } = req.body || {};
 
@@ -1943,7 +1831,7 @@ module.exports = async (options) => {
         nom: attrs.nom || '',
       });
     });
-    LOG.info('Route /api/login (mock auth) montée — USE_MOCK_AUTH=true');
+    LOG.info(`Route /api/login (mock auth) montée — auth.kind=${authKind}`);
   } else {
     // -----------------------------------------------------------------------
     // Helper : Construire le redirect_uri dynamiquement depuis la requête.
@@ -1964,7 +1852,7 @@ module.exports = async (options) => {
 
     function getOAuthCallbackUri(req) {
       const fwdProto = req.headers['x-forwarded-proto'];
-      const fwdHost  = req.headers['x-forwarded-host'];
+      const fwdHost = req.headers['x-forwarded-host'];
 
       if (fwdHost) {
         const proto = fwdProto || 'https';
@@ -1981,7 +1869,7 @@ module.exports = async (options) => {
 
       // Localhost : utiliser l'origin ou le host de la requête
       const referer = req.headers.referer || req.headers.origin || '';
-      const match   = referer.match(/^(https?:\/\/[^/]+)/);
+      const match = referer.match(/^(https?:\/\/[^/]+)/);
       if (match) return `${match[1]}${OAUTH_CALLBACK_PATH}`;
 
       const host = req.get('host') || `localhost:${CDS_PORT}`;
@@ -2073,12 +1961,20 @@ module.exports = async (options) => {
           const devAdmins = (process.env.SMARTORDER_DEV_ADMINS || '')
             .replace(/,/g, ' ').split(/\s+/).filter(Boolean).map(s => s.toLowerCase());
           const userEmail = (payload.email || '').toLowerCase();
-          const userName  = (payload.user_name || username || '').toLowerCase();
+          const userName = (payload.user_name || username || '').toLowerCase();
           if (devAdmins.includes(userEmail) || devAdmins.includes(userName)) {
             role = 'ADMIN';
             LOG.info(`Dev admin override appliqué pour user=${payload.user_name || username}`);
           }
         }
+
+        const identity = {
+          sub: payload.sub,
+          username: payload.user_name || username,
+          email: payload.email || '',
+          given_name: payload.given_name || '',
+          family_name: payload.family_name || '',
+        };
 
         LOG.info(`Login XSUAA réussi : user=${payload.user_name || username} role=${role}`);
 
@@ -2095,7 +1991,7 @@ module.exports = async (options) => {
         return res.status(500).json({ error: 'Erreur serveur lors de l\'authentification XSUAA' });
       }
     });
-    LOG.info('Route /api/login (XSUAA real auth) montée — USE_MOCK_AUTH=false');
+    LOG.info(`Route /api/login (XSUAA real auth) montée — auth.kind=${authKind}`);
 
     // -----------------------------------------------------------------------
     // 1b. GET /api/login/authorize — Redirect to XSUAA login (authorization_code)
@@ -2210,8 +2106,10 @@ if (window.opener && !window.opener.closed) {
         };
         resolveXsuaaUserFromBearerToken(tokenReq);
         const identity = getIdentityFromUser(tokenReq.user);
+
         const role = getUserRole(tokenReq) || 'USER';
         const scopes = getUserScopes(tokenReq);
+
         const browserSession = {
           access_token,
           username: identity.username,
@@ -2309,6 +2207,7 @@ if (window.opener && !window.opener.closed) {
         };
         resolveXsuaaUserFromBearerToken(tokenReq);
         const identity = getIdentityFromUser(tokenReq.user);
+
         const role = getUserRole(tokenReq) || 'USER';
         const session = {
           access_token,
@@ -2351,7 +2250,7 @@ if (window.opener && !window.opener.closed) {
         const hasNameClaim = Boolean(identity.name);
         const hasSplitNameClaims = Boolean(identity.given_name || identity.family_name);
 
-        LOG.debug(`/api/me OK user=${identity.username || req.user.id} role=${role || 'USER'} auth=${process.env.USE_MOCK_AUTH === 'true' ? 'mock' : 'xsuaa'}`);
+        LOG.debug(`/api/me OK user=${identity.username || req.user.id} role=${role || 'USER'} auth=${authKind}`);
 
         return res.json({
           id: req.user.id,
@@ -2367,7 +2266,7 @@ if (window.opener && !window.opener.closed) {
           groups: identity.groups,
           roles: identity.roles,
           identitySource: hasNameClaim ? 'jwt.name' : (hasSplitNameClaims ? 'jwt.given_name_family_name' : 'fallback'),
-          authType: process.env.USE_MOCK_AUTH === 'true' ? 'mock' : 'xsuaa',
+          authType: authKind,
         });
       }
       return res.status(401).json({ error: 'Non authentifié' });

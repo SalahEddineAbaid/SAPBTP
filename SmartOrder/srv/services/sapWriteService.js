@@ -1,25 +1,5 @@
 'use strict';
 
-/**
- * sapWriteService.js — Écriture bidirectionnelle vers SAP S/4HANA
- * Projet PFE SAP BTP — YAAS "Run It Best"
- *
- * Ce service gère toutes les opérations d'écriture vers l'API
- * Purchase Order OData v4 de SAP S/4HANA Cloud :
- *
- *   createOrderInSAP()      → POST /A_PurchaseOrder
- *   updateOrderInSAP()      → PATCH /A_PurchaseOrder('{numerosap}')
- *   deleteOrderInSAP()      → PATCH avec PurOrderIsMarkedForDeletion: true
- *   propagateStatusToSAP()  → Propage un changement de statut vers SAP
- *
- * Fonctionnalités :
- *   - CSRF token automatique via cds.connect.to('SAP_ERP') (fetch_csrf: true)
- *   - Retry exponentiel : 1s → 2s → 4s (3 tentatives)
- *   - Mode mock (USE_MOCK_SAP=true) pour tests locaux sans connexion SAP
- *   - Mapping CDS → SAP OData complet (tous les champs validés)
- *   - Gestion des erreurs SAP avec messages lisibles
- */
-
 const cds = require('@sap/cds');
 const LOG = cds.log('sap-write');
 
@@ -27,8 +7,8 @@ const LOG = cds.log('sap-write');
 // CONSTANTES
 // ===========================================================================
 
-const BASE_PO_URL  = '/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001';
-const PO_ENTITY    = 'PurchaseOrder';
+const BASE_PO_URL = '/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001';
+const PO_ENTITY = 'PurchaseOrder';
 
 /** Délais retry en ms : 1s → 2s → 4s */
 const RETRY_DELAYS = [1000, 2000, 4000];
@@ -77,8 +57,8 @@ async function withRetry(fn, label = 'opération SAP') {
  * L'API SAP renvoie les erreurs dans error.message.value (OData v4).
  */
 function parseSAPError(err, operation) {
-  const status  = getHttpStatus(err);
-  const sapMsg  = err?.reason?.error?.message?.value
+  const status = getHttpStatus(err);
+  const sapMsg = err?.reason?.error?.message?.value
     || err?.error?.message?.value
     || err?.reason?.message
     || err?.message
@@ -122,14 +102,14 @@ function mapCDSOrderToSAP(orderData, fournisseur, lignes = []) {
     : new Date().toISOString().split('T')[0];
 
   return {
-    PurchaseOrderType:      orderData.type || 'NB',
-    Supplier:               fournisseur?.code_sap || orderData.supplier_code || '',
-    CompanyCode:            orderData.company_code || '',
+    PurchaseOrderType: orderData.type || 'NB',
+    Supplier: fournisseur?.code_sap || orderData.supplier_code || '',
+    CompanyCode: orderData.company_code || '',
     PurchasingOrganization: orderData.purchasing_org || '',
-    PurchasingGroup:        orderData.purchasing_group || '',
-    DocumentCurrency:       orderData.devise || 'EUR',
-    PurchaseOrderDate:      dateCommande,
-    to_PurchaseOrderItem:   lignes.map((l, idx) => mapCDSLineToSAP(l, idx)),
+    PurchasingGroup: orderData.purchasing_group || '',
+    DocumentCurrency: orderData.devise || 'EUR',
+    PurchaseOrderDate: dateCommande,
+    to_PurchaseOrderItem: lignes.map((l, idx) => mapCDSLineToSAP(l, idx)),
   };
 }
 
@@ -144,13 +124,13 @@ function mapCDSOrderToSAP(orderData, fournisseur, lignes = []) {
 function mapCDSLineToSAP(ligne, index) {
   const posteNum = String((index + 1) * 10).padStart(5, '0');
   return {
-    PurchaseOrderItem:     posteNum,
-    Material:              ligne.code_produit || '',
+    PurchaseOrderItem: posteNum,
+    Material: ligne.code_produit || '',
     PurchaseOrderItemText: ligne.designation_produit || '',
-    OrderQuantity:         String(ligne.quantite_commandee || 1),
-    NetPriceAmount:        String(ligne.prix_unitaire || 0),
-    OrderPriceUnit:        ligne.unite || 'PC',
-    Plant:                 ligne.plant || '',
+    OrderQuantity: String(ligne.quantite_commandee || 1),
+    NetPriceAmount: String(ligne.prix_unitaire || 0),
+    OrderPriceUnit: ligne.unite || 'PC',
+    Plant: ligne.plant || '',
   };
 }
 
@@ -188,20 +168,20 @@ function mapCDSUpdateToSAP(updateData) {
  */
 async function callSAPWrite(method, path, body) {
   const dest = await cds.connect.to('SAP_ERP');
-  const url  = `${BASE_PO_URL}/${path}`;
+  const url = `${BASE_PO_URL}/${path}`;
 
   LOG.debug('[SAP-WRITE] %s %s', method.toUpperCase(), url.substring(0, 120));
 
   try {
     return await dest[method](url, body);
   } catch (err) {
-    const status  = getHttpStatus(err);
+    const status = getHttpStatus(err);
     const message = parseSAPError(err, `${method.toUpperCase()} ${path}`);
     LOG.error('[SAP-WRITE] Erreur %s : %s', method.toUpperCase(), message);
     const wrapped = new Error(message);
     wrapped.statusCode = status;
-    wrapped.sapError   = true;
-    wrapped.cause      = err;
+    wrapped.sapError = true;
+    wrapped.cause = err;
     throw wrapped;
   }
 }

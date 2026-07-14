@@ -38,11 +38,15 @@ const SERVICE_VIEWS = [
   { name: 'ordersservice_alertes', source: 'smartorder_Alertes' },
   { name: 'ordersservice_historiquestatut', source: 'smartorder_HistoriqueStatut' },
   { name: 'ordersservice_utilisateurs', source: 'smartorder_Utilisateurs' },
+  { name: 'ordersservice_lignescommande', source: 'smartorder_LignesCommande' },
   { name: 'adminservice_utilisateurs', source: 'smartorder_Utilisateurs' },
   { name: 'adminservice_historiquestatut', source: 'smartorder_HistoriqueStatut' },
   { name: 'adminservice_orders', source: 'smartorder_Orders' },
   { name: 'adminservice_syncjobs', source: 'smartorder_SyncJobs' },
   { name: 'adminservice_mlmodels', source: 'smartorder_MlModels' },
+  { name: 'adminservice_lignescommande', source: 'smartorder_LignesCommande' },
+  { name: 'adminservice_predictions', source: 'smartorder_Predictions' },
+  { name: 'adminservice_alertes', source: 'smartorder_Alertes' },
   { name: 'profileservice_monprofil', source: 'smartorder_Utilisateurs' },
 ];
 

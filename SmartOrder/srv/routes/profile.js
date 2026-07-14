@@ -1,18 +1,4 @@
 'use strict';
-/**
- * SmartOrder — Profile & Preferences Routes
- * Routes REST pour la gestion du profil utilisateur
- * 
- * Endpoints :
- * - GET    /api/profile          → Lire le profil de l'utilisateur connecté
- * - PATCH  /api/profile          → Mettre à jour le profil
- * - PATCH  /api/profile/preferences → Mettre à jour les préférences
- * 
- * Sécurité :
- * - Tous les endpoints nécessitent l'authentification (requireRole('USER'))
- * - Un utilisateur ne peut modifier QUE son propre profil
- * - Les champs sensibles (role, perimetre, email) ne sont modifiables que par ADMIN
- */
 
 const express = require('express');
 const cds = require('@sap/cds');
@@ -51,17 +37,17 @@ async function getUserFromDB(userId) {
     : userId;
 
   const user = await db.run(
-    SELECT.one.from('smartorder.Utilisateurs').where({ 
-      xsuaa_user_id: userId 
+    SELECT.one.from('smartorder.Utilisateurs').where({
+      xsuaa_user_id: userId
     }).or({ username: userId })
       .or({ email: userId })
       .or({ username: localUsername })
   );
-  
+
   if (!user) {
     throw new Error('Utilisateur introuvable');
   }
-  
+
   // Parser les préférences JSON
   if (user.preferences && typeof user.preferences === 'string') {
     try {
@@ -70,7 +56,7 @@ async function getUserFromDB(userId) {
       user.preferences = null;
     }
   }
-  
+
   // Parser le périmètre JSON
   if (user.perimetre && typeof user.perimetre === 'string') {
     try {
@@ -79,10 +65,10 @@ async function getUserFromDB(userId) {
       user.perimetre = null;
     }
   }
-  
+
   // Masquer le xsuaa_user_id
   delete user.xsuaa_user_id;
-  
+
   return user;
 }
 
@@ -108,42 +94,42 @@ function applyAuthenticatedIdentity(user, req) {
 // ---------------------------------------------------------------------------
 function validatePreferences(prefs) {
   const errors = [];
-  
+
   if (prefs.theme && !VALID_THEMES.includes(prefs.theme)) {
     errors.push(`Thème invalide. Valeurs autorisées : ${VALID_THEMES.join(', ')}`);
   }
-  
+
   if (prefs.language && !VALID_LANGUAGES.includes(prefs.language)) {
     errors.push(`Langue invalide. Valeurs autorisées : ${VALID_LANGUAGES.join(', ')}`);
   }
-  
+
   if (prefs.density && !VALID_DENSITIES.includes(prefs.density)) {
     errors.push(`Densité invalide. Valeurs autorisées : ${VALID_DENSITIES.join(', ')}`);
   }
-  
+
   if (prefs.dateFormat && !VALID_DATE_FORMATS.includes(prefs.dateFormat)) {
     errors.push(`Format de date invalide. Valeurs autorisées : ${VALID_DATE_FORMATS.join(', ')}`);
   }
-  
+
   if (prefs.timeFormat && !VALID_TIME_FORMATS.includes(prefs.timeFormat)) {
     errors.push(`Format d'heure invalide. Valeurs autorisées : ${VALID_TIME_FORMATS.join(', ')}`);
   }
-  
+
   if (prefs.display?.pagination && !VALID_PAGINATIONS.includes(prefs.display.pagination)) {
     errors.push(`Pagination invalide. Valeurs autorisées : ${VALID_PAGINATIONS.join(', ')}`);
   }
-  
+
   if (prefs.autoRefresh !== undefined && !VALID_AUTO_REFRESH.includes(prefs.autoRefresh)) {
     errors.push(`Auto-refresh invalide. Valeurs autorisées : ${VALID_AUTO_REFRESH.join(', ')}`);
   }
-  
+
   if (prefs.notifications?.types) {
     const invalidTypes = prefs.notifications.types.filter(t => !VALID_ALERT_TYPES.includes(t));
     if (invalidTypes.length > 0) {
       errors.push(`Types d'alertes invalides : ${invalidTypes.join(', ')}`);
     }
   }
-  
+
   return errors;
 }
 
@@ -154,7 +140,7 @@ router.get('/', async (req, res) => {
   try {
     const userId = req.user.id;
     const user = applyAuthenticatedIdentity(await getUserFromDB(userId), req);
-    
+
     LOG.info('GET /api/profile — user=%s', userId);
     res.json(user);
   } catch (err) {
@@ -167,11 +153,11 @@ router.get('/', async (req, res) => {
         return res.json(applyAuthenticatedIdentity(fallbackUser, req));
       }
     }
-    
+
     if (err.message === 'Utilisateur introuvable') {
       return res.status(404).json({ error: err.message });
     }
-    
+
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -183,34 +169,34 @@ router.patch('/', async (req, res) => {
   try {
     const userId = req.user.id;
     const { prenom, nom, telephone, departement, avatar_url } = req.body;
-    
+
     // Validation téléphone
     if (telephone && !PHONE_REGEX.test(telephone)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Format de téléphone invalide',
         message: 'Le téléphone doit contenir 10 chiffres, avec un indicatif international optionnel (+33, +212, etc.)'
       });
     }
-    
+
     // Validation département
     if (departement && !VALID_DEPARTEMENTS.includes(departement)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Département invalide',
         message: `Départements autorisés : ${VALID_DEPARTEMENTS.join(', ')}`
       });
     }
-    
+
     // Validation avatar_url (longueur max)
     if (avatar_url && avatar_url.length > 500) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'URL avatar trop longue',
         message: 'L\'URL de l\'avatar ne peut pas dépasser 500 caractères'
       });
     }
-    
+
     const db = await cds.connect.to('db');
     const now = new Date().toISOString();
-    
+
     // Construire l'objet de mise à jour (seulement les champs fournis)
     const updateData = { updatedAt: now };
     if (prenom !== undefined) updateData.prenom = prenom;
@@ -218,15 +204,15 @@ router.patch('/', async (req, res) => {
     if (telephone !== undefined) updateData.telephone = telephone;
     if (departement !== undefined) updateData.departement = departement;
     if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
-    
+
     await db.run(
       UPDATE('smartorder.Utilisateurs')
         .set(updateData)
         .where({ xsuaa_user_id: userId }).or({ username: userId })
     );
-    
+
     LOG.info('PATCH /api/profile — user=%s fields=%s', userId, Object.keys(updateData).join(','));
-    
+
     // Retourner le profil mis à jour
     const updatedUser = applyAuthenticatedIdentity(await getUserFromDB(userId), req);
     res.json(updatedUser);
@@ -243,30 +229,30 @@ router.patch('/preferences', async (req, res) => {
   try {
     const userId = req.user.id;
     const preferences = req.body;
-    
+
     // Validation des préférences
     const errors = validatePreferences(preferences);
     if (errors.length > 0) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Préférences invalides',
         details: errors
       });
     }
-    
+
     const db = await cds.connect.to('db');
     const now = new Date().toISOString();
-    
+
     // Sérialiser les préférences en JSON
     const preferencesJSON = JSON.stringify(preferences);
-    
+
     await db.run(
       UPDATE('smartorder.Utilisateurs')
         .set({ preferences: preferencesJSON, updatedAt: now })
         .where({ xsuaa_user_id: userId }).or({ username: userId })
     );
-    
+
     LOG.info('PATCH /api/profile/preferences — user=%s', userId);
-    
+
     // Retourner le profil mis à jour
     const updatedUser = applyAuthenticatedIdentity(await getUserFromDB(userId), req);
     res.json(updatedUser);

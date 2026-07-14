@@ -1,0 +1,3 @@
+"id","commande_id","user_id","ancien_statut","nouveau_statut","commentaire","source_changement","createdat"
+"h1000001-0001-0001-0001-000000000001","a1000001-0001-0001-0001-000000000004","u1000001-0001-0001-0001-000000000003","EN_COURS","BLOQUE","Fournisseur BP001001 ne répond plus aux relances depuis 5 jours.","APP_WEB","2025-04-22 16:00:00"
+"h1000001-0001-0001-0001-000000000002","a1000001-0001-0001-0001-000000000003","u1000001-0001-0001-0001-000000000003","EN_LIVRAISON","LIVRE","Réception confirmée en entrepôt central — BL signé.","APP_WEB","2025-03-28 14:00:00"

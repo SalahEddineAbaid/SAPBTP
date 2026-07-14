@@ -1,11 +1,4 @@
 'use strict';
-/**
- * SmartOrder — Analytics Service (CAP version)
- * UC06 : Dashboard KPIs (5 requêtes parallèles)
- * UC11 : Détection anomalies (4 requêtes parallèles)
- *
- * Compatibilité : SQLite (dev) + PostgreSQL (production)
- */
 
 const cds = require('@sap/cds');
 const LOG = cds.log('analytics-service');

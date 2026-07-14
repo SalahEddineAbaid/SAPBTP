@@ -408,8 +408,8 @@ function mapSAPOrderToCDS(sapOrder) {
     code_sap: text(sapOrder.Supplier || sapOrder.SupplierCode, ''),
     nom: text(
       supplierAddr.OrganizationName1    // Nom principal — confirmé par CDS
-        || supplierAddr.AddresseeFullName // Fallback : personne physique
-        || null,
+      || supplierAddr.AddresseeFullName // Fallback : personne physique
+      || null,
       'Fournisseur inconnu'
     ),
     pays: text(supplierAddr.Country, 'MA'),
@@ -982,11 +982,11 @@ async function _processOneOrder(db, sapOrder) {
   const today = new Date().toISOString().split('T')[0];
   const postesEnRetard = sapItems.length > 0
     ? sapItems.filter(item => {
-        const datePrev = order.date_previsionnelle;
-        const qteCommandee = parseDecimal(item.OrderQuantity || item.QuantityOrdered || 0, 'qty').value;
-        const qteLivree = parseDecimal(item.DeliveredQuantity || 0, 'qty').value;
-        return datePrev && datePrev < today && qteLivree < qteCommandee;
-      }).length
+      const datePrev = order.date_previsionnelle;
+      const qteCommandee = parseDecimal(item.OrderQuantity || item.QuantityOrdered || 0, 'qty').value;
+      const qteLivree = parseDecimal(item.DeliveredQuantity || 0, 'qty').value;
+      return datePrev && datePrev < today && qteLivree < qteCommandee;
+    }).length
     : 0;
 
   if (postesEnRetard > 0) {

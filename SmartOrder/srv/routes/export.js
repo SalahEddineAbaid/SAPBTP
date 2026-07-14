@@ -1,8 +1,5 @@
 'use strict';
-/**
- * Route /api/orders/export — Export CSV UC10
- * Compatibilité : SQLite (dev) + PostgreSQL (production)
- */
+
 const express = require('express');
 const cds = require('@sap/cds');
 const { stringify } = require('csv-stringify');
@@ -94,7 +91,7 @@ router.get('/', async (req, res, next) => {
     // En-tête CSV avec BOM UTF-8 pour Excel
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition',
-      `attachment; filename="SmartOrder_Export_${new Date().toISOString().slice(0,10)}.csv"`
+      `attachment; filename="SmartOrder_Export_${new Date().toISOString().slice(0, 10)}.csv"`
     );
 
     // BOM UTF-8 pour compatibilité Excel

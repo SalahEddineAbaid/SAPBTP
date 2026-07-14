@@ -1,22 +1,8 @@
 'use strict';
-/**
- * SmartOrder — SAP Job Scheduling Service Client
- *
- * Enregistre les jobs planifiés auprès du SAP Job Scheduling Service (BTP).
- * Appelé une seule fois au démarrage de l'application en production.
- *
- * Docs : https://help.sap.com/docs/job-scheduling/sap-job-scheduling-service
- *
- * Fonctionnement :
- *   1. Lit les credentials depuis le binding VCAP_SERVICES (via @sap/xsenv)
- *   2. Obtient un token OAuth2 (client_credentials) depuis l'UAA lié
- *   3. Crée ou met à jour les jobs via l'API REST du Job Scheduler
- *   4. Le Job Scheduler appellera en retour les endpoints /api/jobs/* de l'app
- */
 
 const axios = require('axios');
-const cds   = require('@sap/cds');
-const LOG   = cds.log('job-scheduler');
+const cds = require('@sap/cds');
+const LOG = cds.log('job-scheduler');
 
 // ===========================================================================
 // DÉFINITION DES JOBS
@@ -29,30 +15,30 @@ const LOG   = cds.log('job-scheduler');
 function _buildJobDefinitions(appUrl) {
   return [
     {
-      name:        'smartorder-sync-sap-delta',
+      name: 'smartorder-sync-sap-delta',
       description: 'Synchronisation DELTA automatique SAP S/4HANA Cloud (toutes les 6h)',
-      action:      `${appUrl}/api/jobs/sync-sap`,
-      active:      true,
-      httpMethod:  'POST',
+      action: `${appUrl}/api/jobs/sync-sap`,
+      active: true,
+      httpMethod: 'POST',
       schedules: [
         {
           description: 'Toutes les 6 heures',
           // Syntaxe Job Scheduler : cron standard (minutes hours dom month dow)
-          cron:   '0 */6 * * *',
+          cron: '0 */6 * * *',
           active: true,
         },
       ],
     },
     {
-      name:        'smartorder-detect-alertes',
+      name: 'smartorder-detect-alertes',
       description: 'Détection automatique des alertes SmartOrder (toutes les 5min)',
-      action:      `${appUrl}/api/jobs/detect-alertes`,
-      active:      true,
-      httpMethod:  'POST',
+      action: `${appUrl}/api/jobs/detect-alertes`,
+      active: true,
+      httpMethod: 'POST',
       schedules: [
         {
           description: 'Toutes les 5 minutes',
-          cron:   '*/5 * * * *',
+          cron: '*/5 * * * *',
           active: true,
         },
       ],
@@ -102,8 +88,8 @@ async function _getAccessToken(credentials) {
   const response = await axios.post(
     tokenUrl,
     new URLSearchParams({
-      grant_type:    'client_credentials',
-      client_id:     credentials.uaa.clientid,
+      grant_type: 'client_credentials',
+      client_id: credentials.uaa.clientid,
       client_secret: credentials.uaa.clientsecret,
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
@@ -182,7 +168,7 @@ async function registerJobs(appUrl) {
 
   try {
     const token = await _getAccessToken(credentials);
-    const jobs  = _buildJobDefinitions(appUrl);
+    const jobs = _buildJobDefinitions(appUrl);
 
     // Enregistrer chaque job séquentiellement (éviter les races conditions)
     for (const job of jobs) {

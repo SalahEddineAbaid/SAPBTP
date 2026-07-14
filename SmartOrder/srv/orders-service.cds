@@ -1,32 +1,3 @@
-/**
- * SmartOrder — Définition du Service CDS
- * Projet PFE SAP BTP — YAAS "Run It Best"
- *
- * Ce service expose automatiquement des endpoints OData v4 pour toutes les entités.
- * Les routes custom (analytics, WebSocket, admin, ML) sont dans server.js + srv/routes/.
- *
- * Endpoints OData auto-générés :
- *   GET  /odata/v4/orders/Orders?$filter=...&$top=20&$skip=0&$expand=prediction,fournisseur
- *   GET  /odata/v4/orders/Orders(ID)
- *   PATCH /odata/v4/orders/Orders(ID)  (via before/after handlers)
- *   ...
- *
- * Pagination :
- *   Default: 20 items/page  |  Max: 500 items/page
- *   Contrôlé par le handler JS (before READ)
- *
- * Filtres supportés :
- *   $filter=statut eq 'EN_COURS' and urgence eq 'HAUTE'
- *   $filter=montant_total ge 10000 and montant_total le 50000
- *   $filter=date_creation ge 2024-01-01T00:00:00Z
- *   $filter=fournisseur/nom eq 'SAP'
- *   $search=numero_sap (converti en filtre contains par le handler JS)
- *
- * Tri supporté :
- *   $orderby=date_creation desc,score_priorite desc
- *   $orderby=montant_total asc
- */
-
 using smartorder from '../db/schema';
 
 // ============================================================

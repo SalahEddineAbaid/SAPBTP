@@ -1,34 +1,20 @@
 'use strict';
-/**
- * Routes Express CRUD — Commandes (Orders)
- * Projet PFE SAP BTP — YAAS "Run It Best"
- *
- * Ces routes Express fournissent une API REST complémentaire au service OData CAP.
- * Elles permettent aux rôles MANAGER et ADMIN de créer, modifier et supprimer
- * des commandes avec synchronisation automatique vers SAP S/4HANA.
- *
- * Endpoints :
- *   POST   /api/orders           → Créer une commande (MANAGER, ADMIN)
- *   PATCH  /api/orders/:id       → Modifier une commande (MANAGER, ADMIN)
- *   DELETE /api/orders/:id       → Supprimer une commande ANNULÉE (ADMIN)
- *   GET    /api/orders/:id/sync  → Relancer la synchronisation SAP manuellement (ADMIN)
- */
 
 const express = require('express');
-const cds     = require('@sap/cds');
+const cds = require('@sap/cds');
 const { uuid } = cds.utils;
-const crypto  = require('crypto');
+const crypto = require('crypto');
 const { hasMinimumRole } = require('../utils/authz');
 
 const router = express.Router();
-const LOG    = cds.log('orders-route');
+const LOG = cds.log('orders-route');
 
 // ===========================================================================
 // HELPERS — Middleware auth
 // ===========================================================================
 
 function isPostgres() {
-  const db   = cds.env.requires?.db || {};
+  const db = cds.env.requires?.db || {};
   const kind = db.kind || db[process.env.NODE_ENV]?.kind || 'sqlite';
   return kind === 'postgres' || kind === 'postgresql';
 }
@@ -111,9 +97,9 @@ router.post('/', requireManager, async (req, res, next) => {
     if (!date_previsionnelle)
       return res.status(400).json({ error: 'La date prévisionnelle de livraison est obligatoire.' });
 
-    const db     = await cds.connect.to('db');
+    const db = await cds.connect.to('db');
     const userId = req.user?.id || 'system';
-    const now    = new Date().toISOString();
+    const now = new Date().toISOString();
 
     // Charger le fournisseur
     const fournisseur = await db.run(
@@ -126,8 +112,8 @@ router.post('/', requireManager, async (req, res, next) => {
     const fourni = fournisseur[0];
 
     // Numéro provisoire
-    const draftNum     = `DRAFT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-    const orderId      = uuid();
+    const draftNum = `DRAFT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const orderId = uuid();
     const montant_total = lignes.reduce(
       (sum, l) => sum + ((l.prix_unitaire || 0) * (l.quantite_commandee || 0)), 0
     );
@@ -143,11 +129,11 @@ router.post('/', requireManager, async (req, res, next) => {
                ${p(8)},${p(9)},${p(10)},${p(11)},${p(12)},${p(13)},${p(14)},
                ${p(15)},${p(16)},${p(17)},${p(18)},${p(19)},${p(20)},${p(21)})`,
       [orderId, draftNum, type, 'EN_ATTENTE', urgence,
-       now, now, date_previsionnelle,
-       date_commande || now.split('T')[0],
-       montant_total, devise, 0,
-       company_code, purchasing_org, purchasing_group || null,
-       false, '', 0, fournisseur_ID, now, now]
+        now, now, date_previsionnelle,
+        date_commande || now.split('T')[0],
+        montant_total, devise, 0,
+        company_code, purchasing_org, purchasing_group || null,
+        false, '', 0, fournisseur_ID, now, now]
     );
 
     // 2. Insérer les lignes de commande
@@ -159,12 +145,12 @@ router.post('/', requireManager, async (req, res, next) => {
           quantite_commandee, quantite_livree, prix_unitaire, unite, plant)
          VALUES (${p(1)},${p(2)},${p(3)},${p(4)},${p(5)},${p(6)},${p(7)},${p(8)},${p(9)},${p(10)})`,
         [uuid(), orderId, (i + 1) * 10,
-         l.code_produit || 'INCONNU',
-         l.designation_produit || null,
-         l.quantite_commandee || 1, 0,
-         l.prix_unitaire || 0,
-         l.unite || 'PC',
-         l.plant || null]
+        l.code_produit || 'INCONNU',
+        l.designation_produit || null,
+        l.quantite_commandee || 1, 0,
+        l.prix_unitaire || 0,
+        l.unite || 'PC',
+        l.plant || null]
       );
     }
 
@@ -174,7 +160,7 @@ router.post('/', requireManager, async (req, res, next) => {
        (ID, commande_ID, ancien_statut, nouveau_statut, commentaire, source_changement, createdAt)
        VALUES (${p(1)},${p(2)},${p(3)},${p(4)},${p(5)},${p(6)},${p(7)})`,
       [uuid(), orderId, 'EN_ATTENTE', 'EN_ATTENTE',
-       `Commande créée par ${userId}.`, 'APP_WEB', now]
+      `Commande créée par ${userId}.`, 'APP_WEB', now]
     );
 
     // 4. Répondre immédiatement (sync SAP en arrière-plan)
@@ -217,8 +203,8 @@ router.patch('/:id', requireManager, async (req, res, next) => {
     const { id } = req.params;
     const { urgence, date_previsionnelle, purchasing_group, devise } = req.body;
 
-    const db     = await cds.connect.to('db');
-    const now    = new Date().toISOString();
+    const db = await cds.connect.to('db');
+    const now = new Date().toISOString();
 
     // Charger la commande actuelle
     const rows = await db.run(
@@ -238,10 +224,10 @@ router.patch('/:id', requireManager, async (req, res, next) => {
 
     // Construire les champs à mettre à jour
     const updates = { date_modification: now, updatedAt: now };
-    if (urgence)             updates.urgence = urgence;
+    if (urgence) updates.urgence = urgence;
     if (date_previsionnelle) updates.date_previsionnelle = date_previsionnelle;
-    if (purchasing_group)    updates.purchasing_group = purchasing_group;
-    if (devise)              updates.devise = devise;
+    if (purchasing_group) updates.purchasing_group = purchasing_group;
+    if (devise) updates.devise = devise;
 
     if (Object.keys(updates).length <= 2) {
       return res.status(400).json({ error: 'Aucun champ modifiable fourni.' });
@@ -312,7 +298,7 @@ router.delete('/:id', requireAdmin, async (req, res, next) => {
     if (commande.statut !== 'ANNULE') {
       return res.status(409).json({
         error: `La suppression n'est autorisée que pour les commandes en statut ANNULE. ` +
-               `Statut actuel : "${commande.statut}" (commande: ${commande.numero_sap}).`,
+          `Statut actuel : "${commande.statut}" (commande: ${commande.numero_sap}).`,
       });
     }
 

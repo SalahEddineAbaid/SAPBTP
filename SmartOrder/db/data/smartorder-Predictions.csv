@@ -1,5 +1,0 @@
-ID,commande_ID,risque_label,risque_score,risque_probabilites,duree_estimee_jours,duree_reelle_jours,score_composite,priorite_action,suggestion,features_snapshot,modele_version,calcule_le,recalcul_requis
-p1000001-0001-0001-0001-000000000001,a1000001-0001-0001-0001-000000000001,MOYEN,0.45,"{""FAIBLE"":0.3,""MOYEN"":0.45,""ELEVE"":0.25}",35,,0.62,SURVEILLER,Surveiller les délais fournisseur,{},v1.0.0,2025-04-15T10:00:00Z,false
-p1000001-0001-0001-0001-000000000002,a1000001-0001-0001-0001-000000000004,ELEVE,0.78,"{""FAIBLE"":0.05,""MOYEN"":0.17,""ELEVE"":0.78}",45,,0.88,ESCALADER,Contacter le fournisseur immédiatement,{},v1.0.0,2025-04-22T16:00:00Z,false
-p1000001-0001-0001-0001-000000000003,a1000001-0001-0001-0001-000000000005,FAIBLE,0.15,"{""FAIBLE"":0.75,""MOYEN"":0.20,""ELEVE"":0.05}",22,,0.25,SURVEILLER,Aucune action requise,{},v1.0.0,2025-04-25T09:00:00Z,false
-p1000001-0001-0001-0001-000000000004,a1000001-0001-0001-0001-000000000008,ELEVE,0.92,"{""FAIBLE"":0.02,""MOYEN"":0.06,""ELEVE"":0.92}",10,,0.95,TRAITER_EN_PRIORITE,Escalader immédiatement — délai critique,{},v1.0.0,2025-04-28T07:00:00Z,false

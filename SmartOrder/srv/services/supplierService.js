@@ -105,7 +105,7 @@ async function getSupplierRows(db, { top = 100, skip = 0, search = '' } = {}) {
   const normalizedSearch = String(search || '').trim().toLowerCase();
   const filtered = normalizedSearch
     ? rows.filter((row) => [row.code_sap, row.nom, row.pays, row.email]
-        .some((value) => String(value || '').toLowerCase().includes(normalizedSearch)))
+      .some((value) => String(value || '').toLowerCase().includes(normalizedSearch)))
     : rows;
 
   return {

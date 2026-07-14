@@ -1,5 +1,0 @@
-ID,xsuaa_user_id,username,email,prenom,nom,role,perimetre,actif,derniere_connexion,telephone,departement,avatar_url,preferences,createdAt,updatedAt
-u1000001-0001-0001-0001-000000000001,admin,admin,admin@yaas.ma,Admin,YAAS,ADMIN,,true,2025-05-18T08:00:00Z,+212600000001,Informatique,,{},2025-01-01T08:00:00Z,2025-05-18T08:00:00Z
-u1000001-0001-0001-0001-000000000002,k.nadi@yaas.ma,k.nadi,k.nadi@yaas.ma,Khalid,Nadi,ADMIN,,true,2025-05-18T09:00:00Z,+212600000002,Direction,,{},2025-01-01T08:00:00Z,2025-05-18T09:00:00Z
-u1000001-0001-0001-0001-000000000003,m.benali,m.benali,m.benali@yaas.ma,Mohammed,Benali,MANAGER,"{""company_codes"":[""1000""],""purchasing_orgs"":[""1000""]}",true,2025-05-17T08:00:00Z,+212600000003,Achats,,{},2025-01-01T08:00:00Z,2025-05-17T08:00:00Z
-u1000001-0001-0001-0001-000000000004,y.alami,y.alami,y.alami@yaas.ma,Youssef,Alami,USER,,true,2025-05-16T08:00:00Z,+212600000004,Logistique,,{},2025-01-01T08:00:00Z,2025-05-16T08:00:00Z

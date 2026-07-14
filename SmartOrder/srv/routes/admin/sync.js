@@ -1,11 +1,5 @@
 'use strict';
-/**
- * Routes Admin — Synchronisation SAP manuelle (UC15)
- * POST /api/admin/sync → 202 Async (tâche background)
- * GET  /api/admin/sync/:jobId → Statut du job
- *
- * Base de données : SAP HANA Cloud (BTP)
- */
+
 const express = require('express');
 const cds = require('@sap/cds');
 const { uuid } = cds.utils;
@@ -59,7 +53,7 @@ router.get('/', async (req, res, next) => {
     res.json({ items: jobs, total: jobs.length });
   } catch (err) {
     LOG.warn('Impossible de lire les jobs : %s', err.message);
-    if (csvFallbackEnabled()) {
+    if (csvFallbackEnabled() && isRecoverableDbError(err)) {
       const fallback = readSyncJobsFallback({ top: 20 }).value;
       res.set('x-smartorder-data-source', 'csv-fallback');
       return res.json({ items: fallback, total: fallback.length });
@@ -163,9 +157,9 @@ async function _executerSync(jobId, mode) {
   try {
     const syncSAPService = require('../../services/syncSAPService');
     const result = await syncSAPService.syncDelta(mode, { jobId, skipJobInsert: true });
-    creees      = result.creees      || 0;
+    creees = result.creees || 0;
     mises_a_jour = result.mises_a_jour || 0;
-    erreurs     = result.erreurs     || 0;
+    erreurs = result.erreurs || 0;
   } catch (err) {
     erreurs = 1;
     LOG.error('Sync SAP échouée : %s', err.message);

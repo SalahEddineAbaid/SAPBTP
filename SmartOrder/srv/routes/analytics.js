@@ -1,9 +1,5 @@
 'use strict';
-/**
- * Route /api/analytics — KPIs + Anomalies
- * UC06 : Dashboard KPIs
- * UC11 : Détection anomalies
- */
+
 const express = require('express');
 const cds = require('@sap/cds');
 const { getKPIs, getAnomalies } = require('../services/analyticsService');

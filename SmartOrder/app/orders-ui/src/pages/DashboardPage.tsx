@@ -128,7 +128,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="h-44 min-h-[176px] w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={200} minHeight={176}>
               <AreaChart data={performanceData} margin={{ top: 4, right: 4, left: -32, bottom: 0 }}>
                 <defs>
                   <linearGradient id="perfGrad" x1="0" y1="0" x2="0" y2="1">
@@ -275,7 +275,7 @@ export default function DashboardPage() {
             return (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
                 <div className="relative w-48 h-48 min-w-[192px] min-h-[192px] flex-shrink-0 flex items-center justify-center bg-transparent">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={192} minHeight={192}>
                     <PieChart>
                       <defs>
                         {statusData.map((d, i) => {

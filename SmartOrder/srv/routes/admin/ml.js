@@ -1,9 +1,5 @@
 'use strict';
-/**
- * Routes Admin — Gestion modèles ML (UC16)
- * POST /api/admin/ml/retrain → 202 Async
- * GET  /api/admin/ml/models  → Liste des modèles
- */
+
 const express = require('express');
 const cds = require('@sap/cds');
 const { uuid } = cds.utils;
@@ -65,7 +61,7 @@ router.get('/models', async (req, res, next) => {
     const mlHealth = await mlService.healthCheck();
     res.json({ models, mlService: mlHealth });
   } catch (err) {
-    if (csvFallbackEnabled()) {
+    if (csvFallbackEnabled() && isRecoverableDbError(err)) {
       const models = readMlModelsFallback().value;
       const mlHealth = await mlService.healthCheck().catch(() => ({ status: 'degraded', version: 'v1.0.0' }));
       res.set('x-smartorder-data-source', 'csv-fallback');
@@ -162,13 +158,13 @@ async function _executerRetrain(jobId, force) {
     if (io) {
       io.to('ADMIN').emit('ML_RETRAIN_COMPLETE', {
         jobId,
-        version:      result.version,
-        accuracy:     result.classification_metrics?.accuracy,
-        f1_score:     result.classification_metrics?.f1_score,
-        mae:          result.regression_metrics?.mae,
-        r2:           result.regression_metrics?.r2,
+        version: result.version,
+        accuracy: result.classification_metrics?.accuracy,
+        f1_score: result.classification_metrics?.f1_score,
+        mae: result.regression_metrics?.mae,
+        r2: result.regression_metrics?.r2,
         dataset_size: records.length,
-        duree_s:      dureeS,
+        duree_s: dureeS,
       });
     }
 

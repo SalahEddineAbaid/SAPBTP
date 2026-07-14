@@ -1,17 +1,12 @@
 'use strict';
-/**
- * SmartOrder — ML Service Client (CAP version)
- * Client HTTP vers le microservice FastAPI (ml-service)
- * Cache 1h en mémoire pour éviter des appels répétés
- */
 
 const axios = require('axios');
 const cds = require('@sap/cds');
 const LOG = cds.log('ml-service-client');
 
-const ML_URL      = process.env.ML_SERVICE_URL || 'http://localhost:8000';
-const TIMEOUT_MS  = parseInt(process.env.ML_TIMEOUT_MS || '5000');
-const CACHE_TTL   = parseInt(process.env.PREDICTION_CACHE_TTL_MINUTES || '60') * 60 * 1000;
+const ML_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
+const TIMEOUT_MS = parseInt(process.env.ML_TIMEOUT_MS || '5000');
+const CACHE_TTL = parseInt(process.env.PREDICTION_CACHE_TTL_MINUTES || '60') * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Cache en mémoire (Map : orderId → { prediction, expiresAt })
@@ -133,16 +128,16 @@ function _heuristicFallback(feature) {
   const prioriteAction = scoreComposite >= 0.8
     ? 'TRAITER_EN_PRIORITE'
     : scoreComposite >= 0.5
-    ? 'SURVEILLER'
-    : 'ESCALADER';
+      ? 'SURVEILLER'
+      : 'ESCALADER';
 
   return {
     risque_label: risqueLabel,
     risque_score: risqueScore,
     risque_probabilites: {
       faible: risqueLabel === 'FAIBLE' ? risqueScore : 0.1,
-      moyen:  risqueLabel === 'MOYEN'  ? risqueScore : 0.2,
-      eleve:  risqueLabel === 'ELEVE'  ? risqueScore : 0.1,
+      moyen: risqueLabel === 'MOYEN' ? risqueScore : 0.2,
+      eleve: risqueLabel === 'ELEVE' ? risqueScore : 0.1,
     },
     duree_estimee_jours: feature.delai_moyen_fournisseur || 7,
     score_composite: scoreComposite,

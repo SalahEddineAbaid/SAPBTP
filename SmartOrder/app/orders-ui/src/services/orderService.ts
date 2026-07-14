@@ -9,15 +9,15 @@ import type {
 } from '../types';
 import { fetchApi } from './apiClient';
 
-const BASE     = '/odata/v4/orders';
+const BASE = '/odata/v4/orders';
 const BASE_API = '/api/orders/crud';
 
 /**
  * Fetch avec timeout automatique
  */
 async function fetchWithTimeout(
-  url: string, 
-  options: RequestInit = {}, 
+  url: string,
+  options: RequestInit = {},
   timeout = 60000
 ): Promise<Response> {
   return fetchApi(url, options, { timeoutMs: timeout, retries: 2 });

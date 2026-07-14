@@ -6,7 +6,7 @@ function getHeaders(): Record<string, string> {
   try {
     const data = JSON.parse(stored);
     if (data.access_token) return { Authorization: `Bearer ${data.access_token}` };
-    if (data.credentials)  return { Authorization: `Basic ${data.credentials}` };
+    if (data.credentials) return { Authorization: `Basic ${data.credentials}` };
   } catch { /* ignore */ }
   return {};
 }
@@ -17,18 +17,18 @@ async function handleResponse(res: Response, context: string) {
     window.location.href = '/login';
     throw new Error('Session expirée');
   }
-  
+
   if (res.status === 403) {
     throw new Error(
       'Accès refusé. Cette fonctionnalité nécessite le rôle MANAGER ou ADMIN.'
     );
   }
-  
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error?.message || `Erreur ${context}`);
   }
-  
+
   return res.json();
 }
 

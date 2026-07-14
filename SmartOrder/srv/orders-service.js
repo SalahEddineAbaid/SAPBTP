@@ -1,17 +1,4 @@
 'use strict';
-/**
- * SmartOrder — Custom CAP Service Handler
- * Projet PFE SAP BTP — YAAS "Run It Best"
- *
- * Ce fichier étend le service OData CAP avec la logique métier custom :
- * - Machine à états pour les changements de statut (UC07)
- * - Pagination sécurisée (20 items/page, max 500)
- * - Recherche par numero_sap ($search)
- * - Inférence ML avec cache 1h (UC08)
- * - Acquittement des alertes
- * - Anti-auto-dégradation admin
- * - Audit trail complet pour les changements de statut
- */
 
 const cds = require('@sap/cds');
 const { uuid } = cds.utils;
@@ -64,22 +51,22 @@ const getSapWriteService = () => {
 //   ANNULE      → (terminal — aucune transition)
 //
 const STATE_MACHINE = {
-  EN_ATTENTE:   ['EN_COURS', 'ANNULE'],
-  EN_COURS:     ['EN_LIVRAISON', 'BLOQUE', 'ANNULE'],
+  EN_ATTENTE: ['EN_COURS', 'ANNULE'],
+  EN_COURS: ['EN_LIVRAISON', 'BLOQUE', 'ANNULE'],
   EN_LIVRAISON: ['LIVRE', 'BLOQUE'],
-  BLOQUE:       ['EN_COURS', 'ANNULE'],
-  LIVRE:        [],   // État terminal — immuable
-  ANNULE:       [],   // État terminal — immuable
+  BLOQUE: ['EN_COURS', 'ANNULE'],
+  LIVRE: [],   // État terminal — immuable
+  ANNULE: [],   // État terminal — immuable
 };
 
 /** Labels lisibles pour les messages d'erreur */
 const STATUT_LABELS = {
-  EN_ATTENTE:   'En attente',
-  EN_COURS:     'En cours de traitement',
+  EN_ATTENTE: 'En attente',
+  EN_COURS: 'En cours de traitement',
   EN_LIVRAISON: 'En livraison',
-  LIVRE:        'Livré',
-  ANNULE:       'Annulé',
-  BLOQUE:       'Bloqué',
+  LIVRE: 'Livré',
+  ANNULE: 'Annulé',
+  BLOQUE: 'Bloqué',
 };
 
 /**
@@ -306,20 +293,20 @@ module.exports = class OrdersService extends cds.ApplicationService {
 
       // Valeurs par défaut
       const now = new Date().toISOString();
-      req.data.statut           = req.data.statut           || 'EN_ATTENTE';
-      req.data.urgence          = req.data.urgence          || 'NORMALE';
-      req.data.devise           = req.data.devise           || 'EUR';
-      req.data.type             = req.data.type             || 'NB';
-      req.data.date_creation    = req.data.date_creation    || now;
-      req.data.date_modification= now;
-      req.data.date_commande    = req.data.date_commande    || now.split('T')[0];
-      req.data.montant_total    = req.data.montant_total    || 0;
-      req.data.score_priorite   = 0;
+      req.data.statut = req.data.statut || 'EN_ATTENTE';
+      req.data.urgence = req.data.urgence || 'NORMALE';
+      req.data.devise = req.data.devise || 'EUR';
+      req.data.type = req.data.type || 'NB';
+      req.data.date_creation = req.data.date_creation || now;
+      req.data.date_modification = now;
+      req.data.date_commande = req.data.date_commande || now.split('T')[0];
+      req.data.montant_total = req.data.montant_total || 0;
+      req.data.score_priorite = 0;
       req.data.postes_en_retard = 0;
       req.data.marqueur_suppression = false;
-      req.data.statut_approbation   = '';
-      req.data.createdAt  = now;
-      req.data.updatedAt  = now;
+      req.data.statut_approbation = '';
+      req.data.createdAt = now;
+      req.data.updatedAt = now;
     });
 
     // BEFORE UPDATE — Bloquer les modifications sur états terminaux
@@ -534,23 +521,23 @@ module.exports = class OrdersService extends cds.ApplicationService {
       // Vérifier le périmètre manager (UC04)
       if (!req.user) return;
       const role = getEffectiveRole(req.user) || 'USER';
-      
+
       if (role === 'ADMIN') return; // Les admins voient tout
-      
+
       if (role === 'MANAGER') {
         // Récupérer le périmètre du manager
         const db = await cds.connect.to('db');
-        
+
         try {
           const manager = await db.run(
-            SELECT.one.from('smartorder.Utilisateurs').where({ 
-              xsuaa_user_id: req.user.id 
+            SELECT.one.from('smartorder.Utilisateurs').where({
+              xsuaa_user_id: req.user.id
             }).or({ username: req.user.id })
           );
-          
+
           if (manager?.perimetre) {
             const perimetre = JSON.parse(manager.perimetre);
-            
+
             // Filtrer par company_code
             if (perimetre.company_codes?.length > 0) {
               const companyFilter = {
@@ -560,7 +547,7 @@ module.exports = class OrdersService extends cds.ApplicationService {
                   { list: perimetre.company_codes.map(code => ({ val: code })) }
                 ]
               };
-              
+
               if (!req.query.SELECT.where) {
                 req.query.SELECT.where = [companyFilter];
               } else {
@@ -570,11 +557,11 @@ module.exports = class OrdersService extends cds.ApplicationService {
                   companyFilter
                 ];
               }
-              
-              LOG.info('Filtrage périmètre MANAGER : user=%s company_codes=%s', 
+
+              LOG.info('Filtrage périmètre MANAGER : user=%s company_codes=%s',
                 req.user.id, perimetre.company_codes.join(','));
             }
-            
+
             // Filtrer par purchasing_org
             if (perimetre.purchasing_orgs?.length > 0) {
               const orgFilter = {
@@ -584,7 +571,7 @@ module.exports = class OrdersService extends cds.ApplicationService {
                   { list: perimetre.purchasing_orgs.map(org => ({ val: org })) }
                 ]
               };
-              
+
               if (!req.query.SELECT.where) {
                 req.query.SELECT.where = [orgFilter];
               } else {
@@ -600,7 +587,7 @@ module.exports = class OrdersService extends cds.ApplicationService {
           LOG.warn('Erreur récupération périmètre MANAGER : %s', err.message);
         }
       }
-      
+
       LOG.debug('READ Orders — user=%s role=%s', req.user.id, role);
     });
 
@@ -903,15 +890,15 @@ module.exports = class OrdersService extends cds.ApplicationService {
       } = req.data;
 
       // Validation
-      if (!fournisseur_ID)     return req.error(400, 'fournisseur_ID est obligatoire.');
-      if (!company_code)       return req.error(400, 'company_code est obligatoire.');
-      if (!purchasing_org)     return req.error(400, 'purchasing_org est obligatoire.');
+      if (!fournisseur_ID) return req.error(400, 'fournisseur_ID est obligatoire.');
+      if (!company_code) return req.error(400, 'company_code est obligatoire.');
+      if (!purchasing_org) return req.error(400, 'purchasing_org est obligatoire.');
       if (!date_previsionnelle) return req.error(400, 'date_previsionnelle est obligatoire.');
 
       const db = await cds.connect.to('db');
       const { Orders, LignesCommande, HistoriqueStatut } = this.entities;
       const userId = req.user?.id || 'system';
-      const now    = new Date().toISOString();
+      const now = new Date().toISOString();
 
       // Charger le fournisseur
       const fournisseur = await db.run(
@@ -923,7 +910,7 @@ module.exports = class OrdersService extends cds.ApplicationService {
 
       // Numéro provisoire
       const draftNum = `DRAFT-${require('crypto').randomBytes(4).toString('hex').toUpperCase()}`;
-      const orderId  = uuid();
+      const orderId = uuid();
 
       // Calculer montant total depuis les lignes
       const montant_total = lignes.reduce(
@@ -958,13 +945,13 @@ module.exports = class OrdersService extends cds.ApplicationService {
             ID: uuid(),
             commande_ID: orderId,
             numero_poste: (i + 1) * 10,
-            code_produit:       l.code_produit || 'INCONNU',
+            code_produit: l.code_produit || 'INCONNU',
             designation_produit: l.designation_produit || null,
-            quantite_commandee:  l.quantite_commandee || 1,
+            quantite_commandee: l.quantite_commandee || 1,
             quantite_livree: 0,
-            prix_unitaire:   l.prix_unitaire || 0,
-            unite:   l.unite || 'PC',
-            plant:   l.plant || null,
+            prix_unitaire: l.prix_unitaire || 0,
+            unite: l.unite || 'PC',
+            plant: l.plant || null,
           })
         );
       }
@@ -994,8 +981,10 @@ module.exports = class OrdersService extends cds.ApplicationService {
             SELECT.from('smartorder.LignesCommande').where({ commande_ID: orderId })
           );
           const sapResult = await getSapWriteService().createOrderInSAP(
-            { type, company_code, purchasing_org, purchasing_group, devise,
-              date_commande: date_commande || now.split('T')[0] },
+            {
+              type, company_code, purchasing_org, purchasing_group, devise,
+              date_commande: date_commande || now.split('T')[0]
+            },
             fournisseur,
             lignesBDD
           );
@@ -1152,16 +1141,16 @@ module.exports.AnalyticsService = class AnalyticsService extends cds.Application
       if (!req.user) {
         throw new cds.error('Non authentifié', { status: 401 });
       }
-      
+
       const role = getEffectiveRole(req.user) || 'USER';
-      
+
       if (role === 'USER') {
         throw new cds.error(
           'Accès refusé. Le dashboard analytics nécessite le rôle MANAGER ou ADMIN.',
           { status: 403 }
         );
       }
-      
+
       LOG.debug('READ CommandesAnalytics — user=%s role=%s', req.user.id, role);
     });
 

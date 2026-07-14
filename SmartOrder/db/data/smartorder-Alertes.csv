@@ -1,3 +1,0 @@
-ID,commande_ID,type,severite,message,details,lu,acquitte,destinataires_roles,date_creation,date_acquittement
-a1000011-0001-0001-0001-000000000001,a1000001-0001-0001-0001-000000000004,BLOQUE,ELEVE,Commande 4500001004 bloquée depuis 13 jour(s).,"{""jours_bloques"":13}",false,false,"[""MANAGER"",""ADMIN""]",2025-04-22T17:00:00Z,
-a1000011-0001-0001-0001-000000000002,a1000001-0001-0001-0001-000000000008,RETARD,CRITIQUE,Commande 4500001008 en retard de 1 jour(s).,"{""jours_retard"":1,""fournisseur"":""ACME Maroc Supply""}",false,false,"[""MANAGER"",""ADMIN""]",2025-05-09T08:00:00Z,

@@ -1,12 +1,4 @@
 'use strict';
-/**
- * SmartOrder — Alerte Service
- * Détecte les commandes en retard et bloquées → INSERT alertes + WebSocket
- *
- * Base de données : PostgreSQL (SAP BTP — postgresql-db)
- * En développement BAS (USE_MOCK_SAP=true) : la détection automatique est désactivée.
- * Les alertes manuelles (createAlerte) restent disponibles via l'API.
- */
 
 const cds = require('@sap/cds');
 const { uuid } = cds.utils;
@@ -75,13 +67,13 @@ async function detecterAlertes() {
 
       if (io) {
         io.to('MANAGER').to('ADMIN').emit('ORDER_DELAYED', {
-          orderId:     cmd.ID,
-          orderNo:     cmd.numero_sap,
-          daysLate:    jours,
+          orderId: cmd.ID,
+          orderNo: cmd.numero_sap,
+          daysLate: jours,
           severite,
           fournisseur: cmd.fournisseur_nom,
-          suggestion:  cmd.suggestion || 'Contacter le fournisseur.',
-          timestamp:   new Date().toISOString(),
+          suggestion: cmd.suggestion || 'Contacter le fournisseur.',
+          timestamp: new Date().toISOString(),
         });
       }
       alertesCreees++;
@@ -124,10 +116,10 @@ async function detecterAlertes() {
 
       if (io) {
         io.to('MANAGER').to('ADMIN').emit('ORDER_BLOCKED', {
-          orderId:   cmd.ID,
-          orderNo:   cmd.numero_sap,
+          orderId: cmd.ID,
+          orderNo: cmd.numero_sap,
           daysSince: jours,
-          statut:    'BLOQUE',
+          statut: 'BLOQUE',
           timestamp: new Date().toISOString(),
         });
       }
@@ -187,8 +179,8 @@ async function createAlerte(db, params) {
   const io = global._socketIO;
   if (io) {
     const eventName = type === 'RETARD' ? 'ORDER_DELAYED'
-                    : type === 'BLOQUE' ? 'ORDER_BLOCKED'
-                    : 'ALERT_CREATED';
+      : type === 'BLOQUE' ? 'ORDER_BLOCKED'
+        : 'ALERT_CREATED';
     io.to('MANAGER').to('ADMIN').emit(eventName, {
       alerteId,
       commande_ID,

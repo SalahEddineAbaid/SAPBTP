@@ -2,20 +2,6 @@ import { createContext, useState, useCallback, useEffect, type ReactNode } from 
 import type { UserSession } from '../types';
 import { fetchApi } from '../services/apiClient';
 
-// ---------------------------------------------------------------------------
-// Détection automatique de l'environnement
-//
-// Priorité de détection (ordre décroissant) :
-//   1. REACT_APP_AUTH_MODE=xsuaa  → injecté par `npm run start:xsuaa`
-//   2. port :5000                 → AppRouter hybride local
-//   3. hostname port5000-*        → AppRouter BAS (SAP Business Application Studio)
-//   4. NODE_ENV=production        → déploiement CF / BTP
-//
-// IMPORTANT : même via AppRouter (:5000), la page de login est toujours affichée.
-// L'AppRouter est configuré en authenticationType=none sur les routes frontend :
-// c'est le React qui gère l'auth via Authorization Code (popup) ou Password Grant (ROPC).
-// Le JWT obtenu est stocké dans sessionStorage et envoyé en Bearer sur chaque requête API.
-// ---------------------------------------------------------------------------
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const IS_XSUAA_ENV_MODE = process.env.REACT_APP_AUTH_MODE === 'xsuaa';
 const IS_APPR_OUTER_RUNTIME = typeof window !== 'undefined'
@@ -59,37 +45,43 @@ function toUserSession(data: any): UserSession {
   const displayName = data?.displayName
     || data?.name
     || [data?.prenom || data?.firstName || data?.given_name,
-        data?.nom   || data?.lastName  || data?.family_name]
-        .filter(Boolean).join(' ').trim()
+    data?.nom || data?.lastName || data?.family_name]
+      .filter(Boolean).join(' ').trim()
     || data?.username || data?.email || 'xsuaa-user';
 
   return {
-    username:    data?.username || data?.name || data?.id || data?.email || 'xsuaa-user',
+    username: data?.username || data?.name || data?.id || data?.email || 'xsuaa-user',
     displayName,
-    role:        normalizeRole(data?.role, scopes),
-    email:       data?.email || '',
+    role: normalizeRole(data?.role, scopes),
+    email: data?.email || '',
     credentials: '',
     scopes, groups, roles,
     prenom: data?.prenom || data?.firstName || data?.given_name || '',
-    nom:    data?.nom    || data?.lastName  || data?.family_name  || '',
+    nom: data?.nom || data?.lastName || data?.family_name || '',
   };
 }
 
 function isFreshBackendValidatedSession(data: any) {
   const validatedAt = Number(data?.validatedAt || 0);
-  return validatedAt > 0 && Date.now() - validatedAt < 2 * 60 * 1000;
+  const isBas = typeof window !== 'undefined'
+    && /^port\d+-.+\.applicationstudio\.cloud\.sap$/i.test(window.location.hostname);
+  const timeout = isBas ? 30 * 60 * 1000 : 2 * 60 * 1000;
+  return validatedAt > 0 && Date.now() - validatedAt < timeout;
 }
 
 // ---------------------------------------------------------------------------
 // fetchMeWithBearer — Appelle /api/me avec le JWT Bearer explicitement.
 // Utilisé pour valider un token stocké en sessionStorage.
 // ---------------------------------------------------------------------------
-async function fetchMeWithBearer(token: string): Promise<UserSession | null> {
+async function fetchMeWithBearer(token: string): Promise<UserSession | null | undefined> {
   const res = await fetchApi('/api/me', {
     credentials: 'include',
     headers: { Authorization: `Bearer ${token}` },
   }, { retries: 3, timeoutMs: 20000 });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    if (res.status === 503) return undefined;
+    return null;
+  }
   return toUserSession(await res.json());
 }
 
@@ -123,7 +115,7 @@ interface AuthContextType {
 export const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser]       = useState<UserSession | null>(null);
+  const [user, setUser] = useState<UserSession | null>(null);
   const [loading, setLoading] = useState(true);
 
   // -------------------------------------------------------------------------
@@ -172,6 +164,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setLoading(false);
                 return;
               }
+              if (userData === undefined) {
+                // 503 / indisponible : conserver la session, les appels API géreront 401
+                const fallbackUser = toUserSession(parsed);
+                setUser({ ...parsed, ...fallbackUser, access_token: parsed.access_token });
+                setLoading(false);
+                return;
+              }
               // Token expiré → purger → login requis
               sessionStorage.removeItem('smartorder_user');
             }
@@ -215,25 +214,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.access_token) {
       // XSUAA ROPC : token JWT reçu
       userData = {
-        username:    data.username || username,
+        username: data.username || username,
         displayName: [data.prenom, data.nom].filter(Boolean).join(' ').trim() || data.username || username,
-        role:        data.role || 'USER',
-        email:       data.email || '',
+        role: data.role || 'USER',
+        email: data.email || '',
         credentials: '',
         access_token: data.access_token,
-        prenom:      data.prenom || '',
-        nom:         data.nom    || '',
+        prenom: data.prenom || '',
+        nom: data.nom || '',
       };
     } else {
       // Mock auth : pas de JWT → Basic Auth
       userData = {
-        username:    data.username || username,
-        role:        data.role || 'USER',
-        email:       data.email || '',
+        username: data.username || username,
+        role: data.role || 'USER',
+        email: data.email || '',
         credentials: btoa(`${username}:${password}`),
         access_token: undefined,
-        prenom:      data.prenom || '',
-        nom:         data.nom    || '',
+        prenom: data.prenom || '',
+        nom: data.nom || '',
       };
     }
 
@@ -280,21 +279,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     validatedAt?: number;
   }) => {
     const userData: UserSession = {
-      username:    data.username,
+      username: data.username,
       displayName: data.displayName
         || [data.prenom, data.nom].filter(Boolean).join(' ').trim()
         || data.username,
-      role:        data.role,
-      email:       data.email,
+      role: data.role,
+      email: data.email,
       credentials: '',
       access_token: data.access_token,
-      authType:     data.authType,
-      validatedAt:  data.validatedAt,
-      scopes:       data.scopes || [],
-      groups:       data.groups || [],
-      roles:        data.roles || [],
-      prenom:      data.prenom,
-      nom:         data.nom,
+      authType: data.authType,
+      validatedAt: data.validatedAt,
+      scopes: data.scopes || [],
+      groups: data.groups || [],
+      roles: data.roles || [],
+      prenom: data.prenom,
+      nom: data.nom,
     };
     setUser(userData);
     sessionStorage.setItem('smartorder_user', JSON.stringify(userData));
@@ -326,6 +325,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const id = setInterval(async () => {
       try {
         const userData = await fetchMeWithBearer(user.access_token!);
+        if (userData === undefined) return; // 503 / indisponible, réessayer au prochain cycle
         if (!userData) {
           console.warn('[SmartOrder] Token expiré — déconnexion automatique');
           logout();
@@ -349,7 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const getAuthHeaders = useCallback((): Record<string, string> => {
     if (!user) return {};
     if (user.access_token) return { Authorization: `Bearer ${user.access_token}` };
-    if (user.credentials)  return { Authorization: `Basic ${user.credentials}` };
+    if (user.credentials) return { Authorization: `Basic ${user.credentials}` };
     return {};
   }, [user]);
 
@@ -364,12 +364,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!USE_XSUAA_AUTH) {
       const map: Record<string, string[]> = {
-        ADMIN:   ['orders.read','orders.write','dashboard.read','predictions.view',
-                  'analytics.read','export.csv','admin.users','admin.roles',
-                  'admin.logs','admin.sync','admin.ml'],
-        MANAGER: ['orders.read','orders.write','dashboard.read','predictions.view',
-                  'analytics.read','export.csv'],
-        USER:    ['orders.read'],
+        ADMIN: ['orders.read', 'orders.write', 'dashboard.read', 'predictions.view',
+          'analytics.read', 'export.csv', 'admin.users', 'admin.roles',
+          'admin.logs', 'admin.sync', 'admin.ml'],
+        MANAGER: ['orders.read', 'orders.write', 'dashboard.read', 'predictions.view',
+          'analytics.read', 'export.csv'],
+        USER: ['orders.read'],
       };
       return map[user.role]?.includes(scope) || false;
     }

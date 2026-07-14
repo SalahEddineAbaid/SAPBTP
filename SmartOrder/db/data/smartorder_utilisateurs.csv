@@ -1,0 +1,6 @@
+"id","xsuaa_user_id","username","email","prenom","nom","role","perimetre","actif","derniere_connexion","telephone","departement","avatar_url","preferences","createdat","updatedat"
+"9a3e160c-52e5-4842-9547-afbf5fc825fe","80e6c4a9-72a1-40e5-aad1-d15b4d81a8ec","k.nadi@yaas.ma","k.nadi@yaas.ma","Kaoutar","Nadi","ADMIN",,"true","2026-06-15 11:37:26.148",,,,,"2026-06-15 10:49:00.184","2026-06-15 11:37:26.148"
+"u1000001-0001-0001-0001-000000000001","admin","admin","admin@yaas.ma","Admin","YAAS","ADMIN",,"true","2025-05-18 08:00:00","+212600000001","Informatique",,"{""0"":""{"",""1"":""}"",""theme"":""light""}","2025-01-01 08:00:00","2026-06-19 01:18:48.222"
+"u1000001-0001-0001-0001-000000000002","k.nadi@yaas.ma","k.nadi","k.nadi@yaas.ma","Khalid","Nadi","ADMIN",,"true","2025-05-18 09:00:00","+212600000002","Direction",,"{}","2025-01-01 08:00:00","2025-05-18 09:00:00"
+"u1000001-0001-0001-0001-000000000003","m.benali","m.benali","m.benali@yaas.ma","Mohammed","Benali","MANAGER","{""company_codes"":[""1000""],""purchasing_orgs"":[""1000""]}","true","2025-05-17 08:00:00","+212600000003","Achats",,"{}","2025-01-01 08:00:00","2025-05-17 08:00:00"
+"u1000001-0001-0001-0001-000000000004","y.alami","y.alami","y.alami@yaas.ma","Youssef","Alami","USER",,"true","2025-05-16 08:00:00","+212600000004","Logistique",,"{}","2025-01-01 08:00:00","2025-05-16 08:00:00"

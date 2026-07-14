@@ -1,8 +1,5 @@
 'use strict';
-/**
- * SmartOrder — WebSocket Manager (CAP version)
- * Socket.io avec authentification XSUAA ou mock local
- */
+
 const { Server } = require('socket.io');
 const cds = require('@sap/cds');
 const LOG = cds.log('socket-manager');
@@ -28,15 +25,15 @@ function initSocket(httpServer) {
   // -----------------------------------------------------------------------
   io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token
-               || socket.handshake.headers?.authorization?.split(' ')[1];
+      || socket.handshake.headers?.authorization?.split(' ')[1];
 
     const isDev = process.env.NODE_ENV !== 'production';
 
     if (isDev && !token) {
       // Mode dev — utiliser le rôle passé dans auth
       const mockRole = socket.handshake.auth?.role || 'USER';
-      socket.data.userId  = `dev-${mockRole}`;
-      socket.data.role    = mockRole.toUpperCase();
+      socket.data.userId = `dev-${mockRole}`;
+      socket.data.role = mockRole.toUpperCase();
       socket.join(socket.data.role);
       LOG.debug('WS mock auth — room=%s', socket.data.role);
       return next();
@@ -50,11 +47,11 @@ function initSocket(httpServer) {
       // Authentification via CAP auth service
       const authInfo = await cds.auth.authenticate(token);
       const role = authInfo.is?.('ADMIN') ? 'ADMIN'
-                 : authInfo.is?.('MANAGER') ? 'MANAGER'
-                 : 'USER';
+        : authInfo.is?.('MANAGER') ? 'MANAGER'
+          : 'USER';
 
       socket.data.userId = authInfo.id || authInfo.attr?.username;
-      socket.data.role   = role;
+      socket.data.role = role;
       socket.join(role);
 
       LOG.debug('WS auth OK — userId=%s room=%s', socket.data.userId, role);

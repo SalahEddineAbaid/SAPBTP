@@ -1,0 +1,144 @@
+# ============================================================
+# SmartOrder ML — Feature Configuration
+# ============================================================
+# Declarative feature definitions mapped to OrderCanonical.
+# ~15 features to maintain ratio < 1:3 with 51 real samples.
+# ============================================================
+
+features:
+
+  # --- Temporal Features ---
+  temporal:
+    - name: lead_time_days
+      type: int
+      formula: "(date_previsionnelle - date_creation).days"
+      description: "Délai prévu entre création et livraison"
+      nullable: false
+
+    - name: order_age_days
+      type: int
+      formula: "(reference_date - date_creation).days"
+      description: "Âge de la commande en jours"
+      nullable: false
+
+    - name: month_creation
+      type: int
+      formula: "date_creation.month"
+      description: "Mois de création (1-12)"
+      nullable: false
+
+    - name: day_of_week_creation
+      type: int
+      formula: "date_creation.weekday()"
+      description: "Jour de la semaine (0=lundi, 6=dimanche)"
+      nullable: false
+
+    - name: is_quarter_end
+      type: bool
+      formula: "date_creation.month in (3, 6, 9, 12)"
+      description: "Fin de trimestre (pression achats)"
+      nullable: false
+
+  # --- Supplier Features ---
+  supplier:
+    - name: supplier_delay_rate
+      type: float
+      source: fournisseur_taux_retard
+      description: "Taux de retard historique du fournisseur"
+      nullable: false
+
+    - name: supplier_avg_lead_time
+      type: float
+      source: fournisseur_delai_moyen
+      description: "Délai moyen du fournisseur (jours)"
+      nullable: false
+
+    - name: supplier_perf_score
+      type: float
+      source: fournisseur_score_perf
+      description: "Score de performance fournisseur (0-1)"
+      nullable: false
+
+  # --- Amount / Volume Features ---
+  amount:
+    - name: montant_total_log
+      type: float
+      formula: "log1p(montant_total)"
+      description: "Log du montant total (réduction skewness)"
+      nullable: false
+
+    - name: montant_par_ligne
+      type: float
+      formula: "montant_total / max(nb_lignes, 1)"
+      description: "Montant moyen par ligne de commande"
+      nullable: false
+
+    - name: nb_lignes
+      type: int
+      source: nb_lignes
+      description: "Nombre de lignes dans la commande"
+      nullable: false
+
+    - name: taux_livraison
+      type: float
+      source: taux_livraison
+      description: "Ratio quantité livrée / commandée (0-1)"
+      nullable: false
+
+  # --- Categorical Features ---
+  categorical:
+    - name: urgence
+      type: category
+      source: urgence
+      encoding: ordinal
+      order: ["NORMALE", "HAUTE", "CRITIQUE"]
+      description: "Niveau d'urgence (ordinal)"
+
+    - name: statut_approbation
+      type: category
+      source: statut_approbation
+      encoding: ordinal
+      order: ["", "X", "R"]
+      description: "Statut approbation SAP"
+
+    - name: fournisseur_pays
+      type: category
+      source: fournisseur_pays
+      encoding: native  # CatBoost handles natively
+      description: "Pays du fournisseur (ISO 3)"
+
+    - name: purchasing_group
+      type: category
+      source: purchasing_group
+      encoding: native  # CatBoost handles natively
+      description: "Groupe d'achat SAP"
+
+    - name: order_type
+      type: category
+      source: order_type
+      encoding: native  # CatBoost handles natively
+      description: "Type de commande SAP (NB, ZNB...)"
+
+# ============================================================
+# CatBoost native categorical columns
+# ============================================================
+catboost_cat_features:
+  - fournisseur_pays
+  - purchasing_group
+  - order_type
+
+# ============================================================
+# Feature scaling
+# ============================================================
+scaling:
+  method: standard  # standard | minmax | robust
+  columns:
+    - lead_time_days
+    - order_age_days
+    - supplier_delay_rate
+    - supplier_avg_lead_time
+    - supplier_perf_score
+    - montant_total_log
+    - montant_par_ligne
+    - nb_lignes
+    - taux_livraison

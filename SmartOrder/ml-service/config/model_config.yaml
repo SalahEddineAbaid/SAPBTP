@@ -1,0 +1,163 @@
+# ============================================================
+# SmartOrder ML — Model Configuration (Hyperparameters)
+# ============================================================
+# CatBoost chosen over LightGBM/Random Forest for native
+# categorical feature handling (SAP data: fournisseur, pays,
+# purchasing_group, order_type).
+# ============================================================
+
+classification:
+  target: target_class
+  metric_primary: f1_weighted
+  metric_secondary: accuracy
+  cv_strategy:
+    type: RepeatedStratifiedKFold
+    n_splits: 5
+    n_repeats: 3
+    random_state: 42
+
+  models:
+    logistic_regression:
+      class: sklearn.linear_model.LogisticRegression
+      params:
+        C: 1.0
+        max_iter: 1000
+        class_weight: balanced
+        solver: lbfgs
+        multi_class: multinomial
+        random_state: 42
+
+    xgboost:
+      class: xgboost.XGBClassifier
+      params:
+        n_estimators: 100
+        max_depth: 3
+        learning_rate: 0.1
+        reg_alpha: 1.0
+        reg_lambda: 1.0
+        use_label_encoder: false
+        eval_metric: mlogloss
+        random_state: 42
+        # Small dataset: strong regularization to prevent overfit
+        min_child_weight: 5
+        subsample: 0.8
+        colsample_bytree: 0.8
+
+    catboost:
+      class: catboost.CatBoostClassifier
+      params:
+        iterations: 200
+        depth: 4
+        learning_rate: 0.1
+        l2_leaf_reg: 3.0
+        random_seed: 42
+        verbose: 0
+        auto_class_weights: Balanced
+        # CatBoost handles categoricals natively — no encoding needed
+        cat_features: auto
+
+regression:
+  target: target_delay_days
+  metric_primary: mae
+  metric_secondary: r2
+  cv_strategy:
+    type: RepeatedKFold
+    n_splits: 5
+    n_repeats: 3
+    random_state: 42
+
+  models:
+    elasticnet:
+      class: sklearn.linear_model.ElasticNet
+      params:
+        alpha: 1.0
+        l1_ratio: 0.5
+        max_iter: 1000
+        random_state: 42
+
+    xgboost_regressor:
+      class: xgboost.XGBRegressor
+      params:
+        n_estimators: 100
+        max_depth: 3
+        learning_rate: 0.1
+        reg_alpha: 1.0
+        reg_lambda: 1.0
+        random_state: 42
+        min_child_weight: 5
+        subsample: 0.8
+        colsample_bytree: 0.8
+
+    catboost_regressor:
+      class: catboost.CatBoostRegressor
+      params:
+        iterations: 200
+        depth: 4
+        learning_rate: 0.1
+        l2_leaf_reg: 3.0
+        random_seed: 42
+        verbose: 0
+        cat_features: auto
+
+# ============================================================
+# Synthetic data generation config
+# ============================================================
+synthetic:
+  enabled: true
+  target_total_samples: 500
+  method: ctgan  # ctgan | smote | both
+
+  # ------------------------------------------------------------------
+  # LATE_NON_BLOCKING_THRESHOLD_DAYS
+  # Business rule (not observed data): a delayed order is considered
+  # "late but non-blocking" if the actual delay is at most this many
+  # days beyond the expected delivery date AND the order is not BLOQUE
+  # and has no high-urgency delayed lines.
+  #
+  # IMPORTANT: This threshold is a BUSINESS DECISION, not a statistical
+  # parameter. It must be validated with procurement domain experts before
+  # any production deployment. Default: 14 days.
+  # ------------------------------------------------------------------
+  late_non_blocking_threshold_days: 14
+
+  # Minimum delay (in days past due) injected into rule-based
+  # late_non_blocking examples. Keeps them clearly distinguishable
+  # from on_time examples (which have delay_days == 0).
+  late_non_blocking_min_delay_days: 1
+
+  # Ratio synthetic / real — warn in report if exceeded
+  max_synthetic_ratio: 0.95
+
+  # Minimum labelled examples per class required to use CTGAN.
+  # Below this, the pipeline cascades to SMOTE, then perturbation.
+  # Rationale: CTGAN on < 20 rows is typically unstable.
+  min_samples_for_ctgan: 20
+
+  # Minimum labelled examples per class required to use SMOTE.
+  # Below this, the pipeline falls back to Gaussian perturbation.
+  # SMOTE needs at least k_neighbors + 1 examples.
+  min_samples_for_smote: 5
+
+  # Minimum examples per class to target in the final dataset before split.
+  # The pipeline will generate synthetic rows until this floor is reached.
+  min_examples_per_class: 20
+
+  ctgan:
+    epochs: 300
+    batch_size: 50
+    generator_dim: [128, 128]
+    discriminator_dim: [128, 128]
+    pac: 1            # Smaller pac for very small datasets
+    random_state: 42
+
+  smote:
+    sampling_strategy: auto
+    k_neighbors: 3   # Reduced for very small dataset
+    random_state: 42
+
+  # Gaussian perturbation fallback — applied when CTGAN and SMOTE are
+  # unavailable (too few source examples).
+  perturbation:
+    # Relative noise: sampled from Normal(0, noise_std * feature_std)
+    noise_std: 0.05
+    random_state: 42

@@ -1,0 +1,56 @@
+# SmartOrder ML — .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual env
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+
+# Data (tracked separately)
+data/real/*.csv
+data/real/*.parquet
+data/sandbox/*.csv
+data/sandbox/*.parquet
+data/synthetic/*.csv
+data/synthetic/*.parquet
+
+# Model artifacts
+models/*.pkl
+models/*.joblib
+models/*.cbm
+models/*.json
+models/*.bin
+
+# MLflow
+mlruns/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Linting
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db

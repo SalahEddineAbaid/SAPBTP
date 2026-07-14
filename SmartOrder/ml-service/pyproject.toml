@@ -1,0 +1,122 @@
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smartorder-ml"
+version = "1.0.0"
+description = "SmartOrder ML Pipeline — Purchase Order Delay Prediction (SAP BTP)"
+readme = "README.md"
+license = {text = "Proprietary — YAAS"}
+requires-python = ">=3.12"
+authors = [
+    {name = "SmartOrder Team", email = "ml@yaas.ma"},
+]
+
+dependencies = [
+    # === Data & Computation ===
+    "pandas>=2.2.3,<3.0",
+    "numpy>=1.26.4,<2.0",
+
+    # === Machine Learning ===
+    "scikit-learn>=1.5.2,<2.0",
+    "xgboost>=2.1.3,<3.0",
+    "catboost>=1.2.7,<2.0",
+    "imbalanced-learn>=0.12.4,<1.0",
+
+    # === Synthetic Data ===
+    "sdv>=1.17.2,<2.0",
+
+    # === Explainability ===
+    "shap>=0.46.0,<1.0",
+
+    # === MLOps ===
+    "mlflow>=2.18.0,<3.0",
+
+    # === API ===
+    "fastapi>=0.115.6,<1.0",
+    "uvicorn[standard]>=0.32.1,<1.0",
+    "pydantic>=2.10.3,<3.0",
+    "pydantic-settings>=2.7.0,<3.0",
+
+    # === Database Connectors ===
+    "hdbcli>=2.22.32",
+    "sqlalchemy>=2.0.36,<3.0",
+    "psycopg2-binary>=2.9.10,<3.0",
+
+    # === HTTP Client ===
+    "httpx>=0.28.1,<1.0",
+
+    # === Utilities ===
+    "python-dotenv>=1.0.1,<2.0",
+    "pyyaml>=6.0.2,<7.0",
+    "joblib>=1.4.2,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.4",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.1",
+    "pandas-stubs>=2.2.3",
+    "types-PyYAML>=6.0.12",
+]
+
+[project.scripts]
+smartorder-ml = "api.main:run"
+
+# ============================================================
+# TOOLS
+# ============================================================
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "schemas", "connectors", "preprocessing", "features", "training", "evaluation", "explainability", "api", "monitoring", "pipelines", "synthetic"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers -x"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring DB connection",
+    "unit: marks pure unit tests",
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["config", "schemas", "connectors", "preprocessing", "features", "training", "evaluation", "api"]
+omit = ["tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 70

@@ -17,22 +17,7 @@ export function getApiBaseUrl() {
 }
 
 function getDirectBasBackendUrl() {
-  if (typeof window === 'undefined') return '';
-
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-
-  // BAS: extract workspace ID and construct backend URL on port 4004
-  const basMatch = hostname.match(/^port\d+-(.+)\.applicationstudio\.cloud\.sap$/i);
-  if (basMatch) {
-    return `${protocol}//port4004-${basMatch[1]}.applicationstudio.cloud.sap`;
-  }
-
-  // Local dev: use localhost on backend port
-  if (/^localhost$|^127\.0\.0\.1$/i.test(hostname)) {
-    return 'http://localhost:4004';
-  }
-
+  // Ne jamais utiliser localhost - toujours passer par l'approuter
   return '';
 }
 
@@ -48,7 +33,7 @@ function getFetchCandidates(input: string) {
 
   const normalizedPath = normalizePath(input);
   const configuredUrl = toApiUrl(normalizedPath);
-  
+
   const candidates = [normalizedPath, configuredUrl];
 
   if (process.env.REACT_APP_DIRECT_API_FALLBACK !== 'false') {
@@ -92,12 +77,6 @@ export async function fetchApi(
       const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const headersRecord = (init.headers || {}) as Record<string, string>;
-        const authHeader = headersRecord.Authorization || headersRecord.authorization;
-        if (authHeader) {
-          console.log(`[apiClient] Fetch to ${candidates[index]} (Attempt ${attempt}/${retries}) - Authorization header size: ${authHeader.length} characters`);
-        }
-
         const response = await fetch(candidates[index], {
           credentials: 'include',
           ...init,

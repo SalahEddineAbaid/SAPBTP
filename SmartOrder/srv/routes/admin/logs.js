@@ -1,8 +1,5 @@
 'use strict';
-/**
- * Routes Admin — Logs système fusionnés (UC14)
- * Compatibilité : SQLite (dev) + PostgreSQL (production)
- */
+
 const express = require('express');
 const cds = require('@sap/cds');
 const {
@@ -85,7 +82,7 @@ router.get('/history', async (req, res, next) => {
     });
   } catch (err) {
     LOG.error('Erreur historique logs : %s', err.message);
-    if (csvFallbackEnabled()) {
+    if (csvFallbackEnabled() && isRecoverableDbError(err)) {
       const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 500);
       res.set('x-smartorder-data-source', 'csv-fallback');
       return res.json(readHistoryFallback({ top: limit }));
@@ -127,10 +124,10 @@ router.get('/', async (req, res, next) => {
     let limitPlaceholder, offsetPlaceholder;
 
     if (pg) {
-      limitPlaceholder  = `$${idx++}`;
+      limitPlaceholder = `$${idx++}`;
       offsetPlaceholder = `$${idx++}`;
     } else {
-      limitPlaceholder  = '?';
+      limitPlaceholder = '?';
       offsetPlaceholder = '?';
     }
     queryParams.push(parseInt(limit), offset);
@@ -166,15 +163,15 @@ router.get('/', async (req, res, next) => {
     res.json({
       logs: auditLogs,
       pagination: {
-        total:  parseInt(countRes[0]?.total || 0),
-        page:   parseInt(page),
-        limit:  parseInt(limit),
-        pages:  Math.ceil((countRes[0]?.total || 0) / parseInt(limit)),
+        total: parseInt(countRes[0]?.total || 0),
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil((countRes[0]?.total || 0) / parseInt(limit)),
       },
     });
   } catch (err) {
     LOG.error('Erreur logs : %s', err.message);
-    if (csvFallbackEnabled()) {
+    if (csvFallbackEnabled() && isRecoverableDbError(err)) {
       const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 500);
       const history = readHistoryFallback({ top: limit }).value;
       const logs = history.map((row) => ({

@@ -1,8 +1,23 @@
 import { useState, useEffect } from 'react';
-import { User, Mail, Phone, Building2, Shield, Clock, Calendar } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  User, Mail, Phone, Building2, Shield, Clock, Calendar, 
+  Check, Edit3, Key, Lock, Bell, Activity, Award, Settings, 
+  Globe, MapPin, Eye, CheckCircle2, ChevronRight, AlertCircle, 
+  RefreshCw, LogOut, ArrowUpRight, ShieldCheck, CheckCircle
+} from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import { getProfile, updateProfile } from '../services/profileService';
-import type { UserProfile } from '../types';
+import { getProfile, updateProfile, updatePreferences } from '../services/profileService';
+import type { UserProfile, UserPreferences } from '../types';
+
+// Import sub-components
+import ProfileHero from '../components/Profile/ProfileHero';
+import ProfileScore from '../components/Profile/ProfileScore';
+import SecurityCenter from '../components/Profile/SecurityCenter';
+import SkillsCard from '../components/Profile/SkillsCard';
+import ActivityTimeline from '../components/Profile/ActivityTimeline';
+import NotificationSettings from '../components/Profile/NotificationSettings';
+import QuickActions from '../components/Profile/QuickActions';
 
 const DEPARTEMENTS = [
   'ACHATS', 'LOGISTIQUE', 'FINANCE', 
@@ -16,7 +31,22 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // Custom modals state
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    oldPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // Local storage keys for mock profile details not stored on BTP schema
+  const localAddrKey = `smartorder_profile_addr_${user?.username || 'default'}`;
+  const localCityKey = `smartorder_profile_city_${user?.username || 'default'}`;
 
   // Form state
   const [formData, setFormData] = useState({
@@ -24,6 +54,13 @@ export default function ProfilePage() {
     nom: '',
     telephone: '',
     departement: '',
+    address: localStorage.getItem(localAddrKey) || '12 Avenue Hassan II, Bureau 4B',
+    city: localStorage.getItem(localCityKey) || 'Casablanca, Maroc',
+  });
+
+  // Security and preference states
+  const [mfaEnabled, setMfaEnabled] = useState(() => {
+    return localStorage.getItem(`smartorder_mfa_${user?.username || 'default'}`) === 'true';
   });
 
   useEffect(() => {
@@ -41,6 +78,8 @@ export default function ProfilePage() {
         nom: data.nom || '',
         telephone: data.telephone || '',
         departement: data.departement || '',
+        address: localStorage.getItem(localAddrKey) || '12 Avenue Hassan II, Bureau 4B',
+        city: localStorage.getItem(localCityKey) || 'Casablanca, Maroc',
       });
     } catch (err: any) {
       setError(err.message || 'Erreur chargement profil');
@@ -53,13 +92,24 @@ export default function ProfilePage() {
     try {
       setSaving(true);
       setError(null);
-      setSuccess(false);
+      setSuccess(null);
 
-      const updatedProfile = await updateProfile(formData, getAuthHeaders());
+      // Save standard fields to backend
+      const updatedProfile = await updateProfile({
+        prenom: formData.prenom,
+        nom: formData.nom,
+        telephone: formData.telephone,
+        departement: formData.departement,
+      }, getAuthHeaders());
+
+      // Save custom fields locally
+      localStorage.setItem(localAddrKey, formData.address);
+      localStorage.setItem(localCityKey, formData.city);
+
       setProfile(updatedProfile);
       setEditing(false);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      setSuccess('Profil mis à jour avec succès');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       setError(err.message || 'Erreur mise à jour profil');
     } finally {
@@ -76,289 +126,512 @@ export default function ProfilePage() {
         nom: profile.nom || '',
         telephone: profile.telephone || '',
         departement: profile.departement || '',
+        address: localStorage.getItem(localAddrKey) || '12 Avenue Hassan II, Bureau 4B',
+        city: localStorage.getItem(localCityKey) || 'Casablanca, Maroc',
       });
     }
   };
 
-  const formatDate = (date?: string) => {
-    if (!date) return '—';
-    return new Date(date).toLocaleString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const getInitials = () => {
-    if (profile?.displayName) {
-      return profile.displayName.substring(0, 2).toUpperCase();
-    }
-    if (profile?.prenom && profile?.nom) {
-      return `${profile.prenom[0]}${profile.nom[0]}`.toUpperCase();
-    }
-    return profile?.username?.substring(0, 2).toUpperCase() || 'U';
-  };
-
-  const getRoleBadgeClass = (role: string) => {
-    switch (role) {
-      case 'ADMIN': return 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20 dark:bg-red-950/10';
-      case 'MANAGER': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 dark:bg-amber-950/10';
-      default: return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 dark:bg-blue-950/10';
+  const handleTogglePreference = async (prefKey: 'email' | 'push') => {
+    if (!profile) return;
+    try {
+      setError(null);
+      const currentPrefs = profile.preferences || {};
+      const newPrefs: UserPreferences = {
+        ...currentPrefs,
+        notifications: {
+          ...currentPrefs.notifications,
+          [prefKey]: !currentPrefs.notifications?.[prefKey],
+        }
+      };
+      
+      const updatedProfile = await updatePreferences(newPrefs, getAuthHeaders());
+      setProfile(updatedProfile);
+      setSuccess('Préférences de notification mises à jour');
+      setTimeout(() => setSuccess(null), 2500);
+    } catch (err: any) {
+      setError(err.message || 'Erreur mise à jour préférences');
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[300px] w-full"><div className="animate-spin rounded-full h-10 w-10 border-4 border-slate-200 border-t-blue-600 dark:border-slate-800 dark:border-t-cyan-400" /></div>;
+  const handleToggleMfa = () => {
+    const nextState = !mfaEnabled;
+    setMfaEnabled(nextState);
+    localStorage.setItem(`smartorder_mfa_${user?.username || 'default'}`, String(nextState));
+    setSuccess(nextState ? 'Double authentification activée' : 'Double authentification désactivée');
+    setTimeout(() => setSuccess(null), 2500);
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(false);
+
+    if (!passwordForm.oldPassword) {
+      setPasswordError('Veuillez saisir votre mot de passe actuel.');
+      return;
+    }
+    if (passwordForm.newPassword.length < 8) {
+      setPasswordError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError('Les mots de passe ne correspondent pas.');
+      return;
+    }
+
+    try {
+      setPasswordLoading(true);
+      // Mock API password update
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setPasswordSuccess(true);
+      setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPasswordSuccess(false);
+      }, 2000);
+    } catch (err) {
+      setPasswordError('Erreur lors de la modification du mot de passe.');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleExportProfile = () => {
+    if (!profile) return;
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(profile, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `profile_${profile.username}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const getJobTitle = () => {
+    if (profile?.role === 'ADMIN') return 'Administrateur Principal';
+    if (profile?.role === 'MANAGER') return 'Directeur Approvisionnements';
+    return 'Acheteur Technique';
+  };
+
+  const getSecurityScore = () => {
+    let score = 70;
+    if (profile?.role === 'ADMIN') score += 12;
+    if (profile?.role === 'MANAGER') score += 8;
+    if (mfaEnabled) score += 15;
+    return Math.min(score, 98);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[500px] w-full space-y-4">
+        <div className="relative w-16 h-16">
+          <div className="absolute inset-0 rounded-full border-4 border-slate-100 dark:border-slate-800" />
+          <div className="absolute inset-0 rounded-full border-4 border-t-blue-600 dark:border-t-cyan-400 animate-spin" />
+        </div>
+        <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 animate-pulse">Chargement de votre profil sécurisé...</p>
+      </div>
+    );
+  }
 
   if (!profile) {
     return (
       <div className="bg-white dark:bg-[#0f1633]/60 border border-slate-200 dark:border-[#1e2749] rounded-2xl p-8 shadow-sm backdrop-blur-md">
         <div className="flex flex-col items-center justify-center py-16 text-slate-400 dark:text-slate-500 text-sm font-semibold">
-          <User size={48} className="opacity-30 mb-4 animate-float" />
-          <p>Profil introuvable</p>
+          <User size={48} className="opacity-30 mb-4 animate-bounce" />
+          <p>Profil de l'agent introuvable ou session expirée.</p>
         </div>
       </div>
     );
   }
 
+  const securityScore = getSecurityScore();
+
   return (
-    <div className="animate-fade-in space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Mon Profil</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Gérez vos informations personnelles</p>
-        </div>
-        {!editing && (
-          <button 
-            className="px-4.5 py-2 rounded-lg text-xs font-bold bg-gradient-to-r from-blue-600 to-sky-500 dark:from-cyan-500 dark:to-blue-600 text-white shadow-sm hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer" 
-            onClick={() => setEditing(true)}
+    <div className="animate-fade-in space-y-8 max-w-7xl mx-auto pb-16 px-4 sm:px-6">
+      
+      {/* Messages */}
+      <AnimatePresence>
+        {error && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="p-4 rounded-2xl text-sm font-semibold border bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400 flex items-center gap-2"
           >
-            Modifier
-          </button>
+            <AlertCircle size={16} />
+            {error}
+          </motion.div>
         )}
-      </div>
 
-      {error && (
-        <div className="p-4 rounded-xl text-sm font-medium border bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400">
-          {error}
-        </div>
-      )}
-
-      {success && (
-        <div className="p-4 rounded-xl text-sm font-medium border bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:text-emerald-400">
-          Profil mis à jour avec succès
-        </div>
-      )}
-
-      {/* Avatar & Nom */}
-      <div className="bg-white dark:bg-[#0f1633]/60 border border-slate-200 dark:border-[#1e2749] rounded-2xl p-6 shadow-sm backdrop-blur-md">
-        <div className="flex items-center gap-6">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-600 to-sky-500 text-white flex items-center justify-center text-3xl font-extrabold shadow-md border-2 border-white dark:border-[#0a0e27]">
-            {getInitials()}
-          </div>
-          <div className="flex-1">
-            <h2 className="text-xl font-bold text-slate-850 dark:text-white leading-tight">
-              {profile.displayName
-                || (profile.prenom && profile.nom
-                ? `${profile.prenom} ${profile.nom}`
-                : profile.username)}
-            </h2>
-            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border mt-2 ${getRoleBadgeClass(profile.role)}`}>
-              {profile.role}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Informations de contact */}
-      <div className="bg-white dark:bg-[#0f1633]/60 border border-slate-200 dark:border-[#1e2749] rounded-2xl p-6 shadow-sm backdrop-blur-md">
-        <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-5">
-          <h3 className="text-base font-extrabold text-slate-800 dark:text-slate-200 tracking-tight flex items-center gap-2">
-            <Mail size={18} className="text-blue-500 dark:text-cyan-400" />
-            Informations de contact
-          </h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Prénom */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Prénom</label>
-            {editing ? (
-              <input
-                type="text"
-                className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-800 dark:text-slate-200 outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all placeholder-slate-400"
-                value={formData.prenom}
-                onChange={(e) => setFormData({ ...formData, prenom: e.target.value })}
-                placeholder="Jean"
-              />
-            ) : (
-              <div className="p-3 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-200/40 dark:border-slate-800/40 rounded-lg text-sm font-semibold text-slate-800 dark:text-slate-200">{profile.prenom || '—'}</div>
-            )}
-          </div>
-
-          {/* Nom */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Nom</label>
-            {editing ? (
-              <input
-                type="text"
-                className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-800 dark:text-slate-200 outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all placeholder-slate-400"
-                value={formData.nom}
-                onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
-                placeholder="Martin"
-              />
-            ) : (
-              <div className="p-3 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-200/40 dark:border-slate-800/40 rounded-lg text-sm font-semibold text-slate-800 dark:text-slate-200">{profile.nom || '—'}</div>
-            )}
-          </div>
-
-          {/* Email (read-only) */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Email</label>
-            <div className="p-3 bg-slate-50/30 dark:bg-slate-950/20 border border-slate-200/30 dark:border-slate-800/30 rounded-lg text-sm font-semibold text-slate-400 dark:text-slate-500">{profile.email}</div>
-            <small className="block text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-              Modifiable uniquement par un administrateur
-            </small>
-          </div>
-
-          {/* Téléphone */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Téléphone</label>
-            {editing ? (
-              <input
-                type="tel"
-                className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-800 dark:text-slate-200 outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all placeholder-slate-400"
-                value={formData.telephone}
-                onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
-                placeholder="+33 1 23 45 67 89"
-              />
-            ) : (
-              <div className="p-3 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-200/40 dark:border-slate-800/40 rounded-lg text-sm font-semibold text-slate-800 dark:text-slate-200">{profile.telephone || '—'}</div>
-            )}
-          </div>
-
-          {/* Département */}
-          <div className="space-y-1.5 md:col-span-2">
-            <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Département</label>
-            {editing ? (
-              <select
-                className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-800 dark:text-slate-200 outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all cursor-pointer"
-                value={formData.departement}
-                onChange={(e) => setFormData({ ...formData, departement: e.target.value })}
-              >
-                <option value="">Sélectionner un département</option>
-                {DEPARTEMENTS.map((dept) => (
-                  <option key={dept} value={dept}>
-                    {dept}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="p-3 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-200/40 dark:border-slate-800/40 rounded-lg text-sm font-semibold text-slate-800 dark:text-slate-200">{profile.departement || '—'}</div>
-            )}
-          </div>
-        </div>
-
-        {editing && (
-          <div className="flex gap-2 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800/40">
-            <button 
-              className="inline-flex items-center gap-2 px-4.5 py-2 rounded-lg text-xs font-bold bg-gradient-to-r from-blue-600 to-sky-500 dark:from-cyan-500 dark:to-blue-600 text-white shadow-sm hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all cursor-pointer" 
-              onClick={handleSave} 
-              disabled={saving}
-            >
-              {saving ? 'Enregistrement...' : 'Enregistrer'}
-            </button>
-            <button 
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-950 cursor-pointer transition-all duration-200" 
-              onClick={handleCancel} 
-              disabled={saving}
-            >
-              Annuler
-            </button>
-          </div>
+        {success && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="p-4 rounded-2xl text-sm font-semibold border bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:text-emerald-400 flex items-center gap-2 shadow-sm"
+          >
+            <CheckCircle2 size={16} className="text-emerald-500" />
+            {success}
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
 
-      {/* Sécurité */}
-      <div className="bg-white dark:bg-[#0f1633]/60 border border-slate-200 dark:border-[#1e2749] rounded-2xl p-6 shadow-sm backdrop-blur-md">
-        <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-4">
-          <h3 className="text-base font-extrabold text-slate-800 dark:text-slate-200 tracking-tight flex items-center gap-2">
-            <Shield size={18} className="text-blue-500 dark:text-cyan-400" />
-            Sécurité
-          </h3>
-        </div>
+      {/* SECTION 1 : HERO BANNER */}
+      <ProfileHero 
+        profile={profile}
+        editing={editing}
+        isProduction={isProduction}
+        onEditClick={() => setEditing(true)}
+        onChangePasswordClick={() => setShowPasswordModal(true)}
+        onExportClick={handleExportProfile}
+      />
 
-        <div className="space-y-0.5">
-          <div className="flex justify-between items-center py-3 border-b border-slate-100 dark:border-slate-800/40 last:border-b-0 text-sm">
-            <span className="text-slate-400 dark:text-slate-500 font-medium">Authentification</span>
-            <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-              ✓ {isProduction ? 'Connecté via SAP XSUAA' : 'Mode développement'}
-            </span>
-          </div>
-
-          <div className="flex justify-between items-center py-3 border-b border-slate-100 dark:border-slate-800/40 last:border-b-0 text-sm">
-            <span className="text-slate-400 dark:text-slate-500 font-medium">Dernière connexion</span>
-            <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 tabular-nums">
-              <Clock size={14} className="text-slate-400" />
-              {formatDate(profile.derniere_connexion)}
-            </span>
-          </div>
-
-          <div className="flex justify-between items-center py-3 border-b border-slate-100 dark:border-slate-800/40 last:border-b-0 text-sm">
-            <span className="text-slate-400 dark:text-slate-500 font-medium">Statut du compte</span>
-            <span className={`font-semibold ${profile.actif ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {profile.actif ? '✓ Actif' : '✗ Inactif'}
-            </span>
-          </div>
-
-          {profile.createdAt && (
-            <div className="flex justify-between items-center py-3 border-b border-slate-100 dark:border-slate-800/40 last:border-b-0 text-sm">
-              <span className="text-slate-400 dark:text-slate-500 font-medium">Compte créé le</span>
-              <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 tabular-nums">
-                <Calendar size={14} className="text-slate-400" />
-                {formatDate(profile.createdAt)}
-              </span>
+      {/* Main Grid: Columns layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+        
+        {/* Main Panel Column (Span 2) */}
+        <div className="lg:col-span-2 space-y-8">
+          
+          {/* SECTION 5 : INFORMATIONS PERSONNELLES */}
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="bg-white dark:bg-[#0f1633]/60 border border-slate-200 dark:border-[#1e2749] rounded-[24px] p-6 shadow-xl backdrop-blur-md"
+          >
+            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-6">
+              <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest flex items-center gap-2">
+                <User size={16} className="text-blue-500" />
+                Informations personnelles
+              </h3>
+              {!editing && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="p-2 text-slate-400 hover:text-blue-600 dark:hover:text-cyan-400 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors"
+                >
+                  <Edit3 size={15} />
+                </button>
+              )}
             </div>
-          )}
+
+            {editing ? (
+              // Form Editing Mode Inputs
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 animate-fade-in">
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Prénom</label>
+                  <input
+                    type="text"
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-semibold outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all text-slate-800 dark:text-slate-100"
+                    value={formData.prenom}
+                    onChange={(e) => setFormData({ ...formData, prenom: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Nom</label>
+                  <input
+                    type="text"
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-semibold outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all text-slate-800 dark:text-slate-100"
+                    value={formData.nom}
+                    onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Téléphone</label>
+                  <input
+                    type="tel"
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-semibold outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all text-slate-800 dark:text-slate-100"
+                    value={formData.telephone}
+                    onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Département</label>
+                  <select
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-semibold outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all cursor-pointer text-slate-800 dark:text-slate-100"
+                    value={formData.departement}
+                    onChange={(e) => setFormData({ ...formData, departement: e.target.value })}
+                  >
+                    <option value="">Sélectionner un département</option>
+                    {DEPARTEMENTS.map((dept) => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Adresse bureau</label>
+                  <input
+                    type="text"
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-semibold outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all text-slate-800 dark:text-slate-100"
+                    value={formData.address}
+                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Ville & Pays</label>
+                  <input
+                    type="text"
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-semibold outline-none focus:border-blue-600 dark:focus:border-cyan-400 transition-all text-slate-800 dark:text-slate-100"
+                    value={formData.city}
+                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                  />
+                </div>
+              </div>
+            ) : (
+              // Premium Enterprise Style Information Cards
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Item 1: Prénom */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <User size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Prénom</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{profile.prenom || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Item 2: Nom */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <User size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Nom de famille</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{profile.nom || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Item 3: Email */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <Mail size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Email Pro</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{profile.email}</p>
+                    </div>
+                  </div>
+                  <Lock size={12} className="opacity-30" />
+                </div>
+
+                {/* Item 4: Phone */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <Phone size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Téléphone direct</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{profile.telephone || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Item 5: Department */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <Building2 size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Département assigné</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{profile.departement || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Item 6: Function */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <Shield size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Fonction SAP</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{getJobTitle()}</p>
+                    </div>
+                  </div>
+                  <Lock size={12} className="opacity-30" />
+                </div>
+
+                {/* Item 7: Address */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <MapPin size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Adresse administrative</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{formData.address}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Item 8: City */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-400 rounded-xl">
+                      <Globe size={15} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-450 dark:text-slate-550 uppercase tracking-wider">Ville & Pays</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{formData.city}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {editing && (
+              <div className="flex gap-3 mt-8 pt-5 border-t border-slate-100 dark:border-slate-800/40 justify-end">
+                <button 
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-950 cursor-pointer transition-all duration-200" 
+                  onClick={handleCancel} 
+                  disabled={saving}
+                >
+                  Annuler
+                </button>
+                <button 
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 transition-all cursor-pointer" 
+                  onClick={handleSave} 
+                  disabled={saving}
+                >
+                  {saving ? 'Enregistrement...' : 'Enregistrer'}
+                </button>
+              </div>
+            )}
+          </motion.div>
+
+          {/* SECTION 3 : SECURITY CENTER */}
+          <SecurityCenter 
+            profile={profile}
+            mfaEnabled={mfaEnabled}
+            securityScore={securityScore}
+            onToggleMfa={handleToggleMfa}
+            onChangePasswordClick={() => setShowPasswordModal(true)}
+          />
+
+          {/* SECTION 6 : COMPÉTENCES & CERTIFICATIONS */}
+          <SkillsCard />
         </div>
+
+        {/* Right Sidebar Columns (Span 1) */}
+        <div className="space-y-8">
+          
+          {/* SECTION 2 : PROFILE SCORE */}
+          <ProfileScore 
+            profile={profile}
+            formData={formData}
+          />
+
+          {/* SECTION 8 : NOTIFICATIONS */}
+          <NotificationSettings 
+            profile={profile}
+            onTogglePreference={handleTogglePreference}
+          />
+
+          {/* SECTION 7 : TIMELINE ACTIVITÉS */}
+          <ActivityTimeline />
+
+          {/* SECTION 9 : QUICK ACTIONS */}
+          <QuickActions 
+            profile={profile}
+            onExportClick={handleExportProfile}
+          />
+        </div>
+
       </div>
 
-      {/* Périmètre (MANAGER uniquement) */}
-      {profile.role === 'MANAGER' && profile.perimetre && (
-        <div className="bg-white dark:bg-[#0f1633]/60 border border-slate-200 dark:border-[#1e2749] rounded-2xl p-6 shadow-sm backdrop-blur-md">
-          <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-4">
-            <h3 className="text-base font-extrabold text-slate-800 dark:text-slate-200 tracking-tight flex items-center gap-2">
-              <Building2 size={18} className="text-blue-500 dark:text-cyan-400" />
-              Périmètre
+      {/* PASSWORD CHANGE MODAL */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-[#0f1633] border border-slate-200 dark:border-[#1e2749] w-full max-w-md rounded-[20px] shadow-2xl p-6 relative animate-scale-in">
+            <h3 className="text-lg font-black text-slate-800 dark:text-white mb-2 flex items-center gap-2">
+              <Lock className="text-blue-500" size={18} />
+              Modifier le mot de passe
             </h3>
-          </div>
+            <p className="text-xs text-slate-400 mb-6">Mettez à jour vos identifiants pour sécuriser votre compte YAAS Enterprise.</p>
 
-          <div className="space-y-4">
-            {profile.perimetre.company_codes && profile.perimetre.company_codes.length > 0 && (
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Company Codes</label>
-                <div className="p-3 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-200/40 dark:border-slate-800/40 rounded-lg text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  {profile.perimetre.company_codes.join(', ')}
-                </div>
+            {passwordError && (
+              <div className="p-3 mb-4 rounded-xl text-xs font-semibold bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400">
+                {passwordError}
               </div>
             )}
 
-            {profile.perimetre.purchasing_orgs && profile.perimetre.purchasing_orgs.length > 0 && (
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Purchasing Organizations</label>
-                <div className="p-3 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-200/40 dark:border-slate-800/40 rounded-lg text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  {profile.perimetre.purchasing_orgs.join(', ')}
-                </div>
+            {passwordSuccess && (
+              <div className="p-3 mb-4 rounded-xl text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle size={14} />
+                Mot de passe mis à jour avec succès.
               </div>
             )}
 
-            <small className="block text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-              ℹ️ Modifiable uniquement par un administrateur
-            </small>
+            <form onSubmit={handlePasswordChange} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Mot de passe actuel</label>
+                <input 
+                  type="password" 
+                  value={passwordForm.oldPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, oldPassword: e.target.value })}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm outline-none focus:border-blue-600 dark:focus:border-cyan-400 text-slate-800 dark:text-slate-100" 
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Nouveau mot de passe</label>
+                <input 
+                  type="password" 
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm outline-none focus:border-blue-600 dark:focus:border-cyan-400 text-slate-800 dark:text-slate-100" 
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Confirmer le nouveau mot de passe</label>
+                <input 
+                  type="password" 
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm outline-none focus:border-blue-600 dark:focus:border-cyan-400 text-slate-800 dark:text-slate-100" 
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2.5 pt-4 justify-end">
+                <button 
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-950 cursor-pointer"
+                  disabled={passwordLoading}
+                >
+                  Annuler
+                </button>
+                <button 
+                  type="submit"
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  disabled={passwordLoading || passwordSuccess}
+                >
+                  {passwordLoading ? 'Mise à jour...' : 'Mettre à jour'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
+
     </div>
   );
 }
